@@ -1,0 +1,532 @@
+---
+title: "Clasificación de pacientes con enfermedad PDAC utilizando Máquinas de Soporte Vectorial (SVM)"
+author: "Santiago Alcaide y Fabiana A Rossi"
+date: "05/12/2021"
+output:
+  html_document:
+    toc: yes
+    df_print: paged
+  html_notebook:
+    theme: spacelab
+    toc: yes
+    toc_float: yes
+    df_print: paged
+subtitle: EEA 2021 - Maestría en Exploración de Datos y Descubrimiento del Conocimiento
+---
+
+# Resumen
+En este trabajo, se describe una aplicación práctica de las Máquinas de Soporte Vectorial, como soporte para acompañar el desarrollo teórico realizado en el primer video de la serie. Se exploran alternativas de funciones kernel, impacto de los parámetros y rendimiento de clasificadores en el caso de estudio: identificación prematura de pacientes con enfermedad PDAC. Se comparan los algoritmos con un modelo de regresión logstica.
+
+# Introducción
+
+El cáncer pancreático es una neoplasia extremadamente mortal, con una incidencia del 30% de los tumores diagnosticados a nivel global durante el año 2020. Una vez diagnosticado, la tasa de supervivencia en los siguientes 5 años es de apenas el 10%. No obstante, si el mismo es detectado en etapas tempranas, la probabilidad de supervivencia aumenta. Desafortunadamente, muchos casos de cáncer pancreático no muestran síntomas detectables sino hasta que el mismo ha generado metástasis. En este sentido, un diagnóstico temprano de los pacientes con cáncer pancreático representa una necesidad clínica insatisfecha y una ventana de oportunidad para el desarrollo de nuevas herramientas que asistan a la identificación temprana de esta afección.
+
+Por tal motivo, se eligió aplicar una clasificación supervisada con Máquinas de Soporte vectorial sobre un conjunto de datos publicado recientemente (Debernardi y col, 2020), con el objeto de ilustrar la fortaleza de dicho algoritmo para clasificar pacientes en función de diversos marcadores urinarios, previo al diagnóstico de PDAC.
+
+# Base de datos
+
+La base de datos de Debernardi y colaboradores (doi: 10.1371/journal.pmed.1003489.) cuenta con la edad (años), sexo, valores de los biomarcadores urinarios creatinina [mg/ml], LYVE1 [ng/ml], REG1B [ng/ml], y TFF1 [ng/ml] para pacientes en tres categorías de la variable diagnóstico: sanos, con alguna condición benigna, y con PDAC (adenocarcinoma pancreático ductal, el tipo de cáncer pancreático más recurrente). Los datos fueron generados en 4 centros de investigación. En este trabajo se decidió utilizar los datos de pacientes cuyo diagnóstico era “normal” (sanos) o “maligno” (PDAC), conformando una base de datos de 381 registros, y se utilizó la totalidad de los datos sin tener en cuenta su proveniencia. 
+
+Fuente original de los datos:
+https://doi.org/10.1371/journal.pmed.1003489.s009
+
+# Procesamiento de base de datos
+
+### Carga de librerías
+```{r libraries, include=T}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(mlr)
+library(dplyr)
+library(ggplot2)
+#remotes::install_github("vqv/ggbiplot")
+library(ggbiplot)
+library(GGally)
+library(ggpubr)
+library(knitr)
+library(googlesheets)
+library(tidyr)
+library(plotly)
+```
+
+### Creación de tema general para los gráficos
+```{r theme, include=T}
+theme <- theme(text = element_text(size=10),plot.title = element_text(size=12, face="bold.italic",
+               hjust = 0.5), axis.title.x = element_text(size=10, face="bold", colour='black'),
+               axis.title.y = element_text(size=10, face="bold"),panel.border = element_blank(),
+               panel.grid.major = element_blank(), panel.grid.minor = element_blank(), legend.title = element_text(face="bold"))
+```
+
+### Carga de datos 
+```{r data} 
+id <- '11wXwKESJrMw6_hqljbOzpn7ncXPjNWeV' # nombre del archivo en google drive
+data <- read.csv(sprintf("https://docs.google.com/uc?id=%s&export=download", id))
+#data <- read.csv('pancreas.csv')
+```
+
+
+### Preprocesamiento 
+```{r procesamiento}
+# Cambio el nombre de las variables a español
+colnames(data) <- c('id','cohorte','origen','edad','sexo','diagnosis','estadio','diagnosis_benigno','plasma_CA19_9','creatinina','LYVE1','REG1B','TFF1','REG1A')
+# Elijo normal y maligno, y renombro 1=normal, 3=maligno
+data <- data %>% filter ( diagnosis=='1' | diagnosis=='3')
+data <- data %>% mutate(diagnosis = sub("1", "normal", diagnosis))
+data <- data %>% mutate(diagnosis = sub("3", "maligno", diagnosis))
+# Transformo como factor
+data$sexo <- as.factor(data$sexo)
+data$diagnosis <- factor(data$diagnosis, levels= c('normal','maligno'))
+# Me quedo sólo con columnas: edad,sexo,diagnosis,creatinina,LYVE1,REG1B,TFF1 y las reordeno
+data <- data %>% dplyr::select(6,5,4,10:13) 
+# Normalizo variables 
+#data <- data %>% mutate_at(c('edad', 'creatinina','LYVE1','REG1B','TFF1'), ~(scale(.) %>% as.vector))
+# Imprimo tabla
+kable(data.frame(variable = names(data),
+           class = sapply(data, class),
+           primeros_valores = sapply(data, function(x) paste0(head(x),  collapse = ", ")),
+           row.names = NULL))
+```
+
+# Análisis exploratorio de las variables 
+
+#### **Análisis exploratorio de las variables y correlaciones de acuerdo al valor de la variable diagnóstico (gráficos)**
+```{r AnálisisExploratorio}
+# Gráfico ggpairs
+data%>% ggpairs(.,mapping=ggplot2::aes(color = diagnosis,alpha = 0.1),
+        upper = list(continuous = wrap("cor", size = 2.5),discrete = "blank", combo="blank"),
+        lower = list(combo = "box"),progress = F)+
+        theme+
+        labs(title= 'Descripción de variables en la base de datos', x='Variable', y='Variable')+
+        scale_fill_manual(values=c('royalblue2','red'))+
+        scale_color_manual(values=c('royalblue2','#ff7474ff'))
+```
+
+
+
+
+# Resultados
+
+### Separación de conjunto de entrenamiento (train) y prueba (test) [70:30]
+```{r separación test y train}
+set.seed(1409) # para asegurar reproducibilidad
+dt = sort(sample(nrow(data), nrow(data)*.7))
+datos_tr<-data[dt,]
+datos_te<-data[-dt,]
+```
+
+
+#### Función Auxiliar
+Esta función toma como argumentos el modelo, los datos de entrenamiento y prueba. 
+Calcula y muestra métricas, y curvas ROC
+
+```{r función métricas}
+metricas <- function(modelo, train, test, nombre){
+  pred_svm_test= predict(modelo, newdata = test)
+  acc_svm_test <- round(measureACC(as.data.frame(pred_svm_test)$truth, as.data.frame(pred_svm_test)$response),3)
+  AUC_svm_test <- round(measureAUC(as.data.frame(pred_svm_test)$prob.maligno,as.data.frame(pred_svm_test)$truth,'normal','maligno'),3)
+  # ···························································································
+  # Predicción TRAIN (naive)
+  pred_svm_train = predict(modelo, newdata = train) # por si quiero ver naive sobre training
+  acc_svm_train <- round(measureACC(as.data.frame(pred_svm_train)$truth, as.data.frame(pred_svm_train)$response),3)
+  AUC_svm_train <- round(measureAUC(as.data.frame(pred_svm_train)$prob.maligno, as.data.frame(pred_svm_train)$truth, 'normal','maligno'),3)
+  # ···························································································
+  # Cambio el threshold [esto lo hago para train y test]
+  acc=NULL
+  acc2=NULL
+  threshold = seq(0.1,0.95,0.01)
+  for (i in 1:length(threshold)) {
+          pred = setThreshold(pred_svm_test, threshold = threshold[i])
+          acc[i] = measureACC(as.data.frame(pred)$truth, as.data.frame(pred)$response)}
+  for (i in 1:length(threshold)) {
+          pred2 = setThreshold(pred_svm_train, threshold = threshold[i])
+          acc2[i] = measureACC(as.data.frame(pred2)$truth, as.data.frame(pred2)$response)}
+  par(mfcol = c(1,2))
+  
+  new_df1 <- as.data.frame(cbind(threshold,acc))
+  new_df1 <- new_df1%>%mutate(sub_data='test')
+  new_df2 <- as.data.frame(cbind(threshold,acc2))
+  colnames(new_df2) <- c('threshold','acc')
+  new_df2 <- new_df2%>%mutate(sub_data='train')
+  
+  new_df <- as.data.frame(rbind(new_df1,new_df2))
+  
+  #new_df1[which.max(new_df1$acc),"threshold"] # test 0.39
+  #new_df2[which.max(new_df2$acc),"threshold"] # train 0.53
+  # ···························································································
+  # Gráfico de cómo varía la métrica de performance accuracy, de acuerdo al umbral elegido
+  plot_acc <- ggplot(new_df, aes(x=threshold, y=acc)) + geom_line(aes(color = sub_data,linetype=sub_data)) +
+          theme +labs(x='Umbral', y='Métrica de performance (accuracy)', 
+                       title= 'Evaluación del modelo de Máquinas de soporte vectorial SVM') +
+          scale_color_manual(values = c("red", "darkred"),labels=c('prueba','entrenamiento')) +
+          scale_linetype_manual(values=c(1,2), labels=c('prueba','entrenamiento')) + 
+          labs(color='Conjunto de\n evaluación',linetype='Conjunto de\n evaluación')
+ 
+  print(plot_acc)
+  
+   # Para independizarnos de la elección del umbral, grafico curvas ROC para las predicciones del modelo SVM con los datos de TEST y TRAIN
+  df_svm = generateThreshVsPerfData(list(svm_te = pred_svm_test, svm_tr = pred_svm_train), 
+                                    measures = list(fpr, tpr, mmce))
+  
+  plot_roc <- plotROCCurves(df_svm) + theme +
+          labs(title=paste0('Curva ROC del modelo - ', nombre), 
+               x='Tasa de falsos positivos (FPR)', y='Tasa de positivos verdaderos (TPR)',
+               color='Conjunto de\n evaluación') +
+          scale_color_manual(values = c("red", "darkred"), labels=c('prueba','entrenamiento'))
+          # geom_label(label="AUC= 0.894", x=0.35, y=0.75, label.size = 0.3, size=4,
+          #            color = "red",fill="white") + 
+          # geom_label(label="AUC= 0.925", x=0.07, y=0.97, label.size = 0.3, size=4,
+          #            color = "darkred",fill="white")
+  
+  print(plot_roc)
+  # ················ Métricas del modelo de SVM ················
+  Métrica <- c('valor','datos')
+  Accuracy <- c(acc_svm_test,'prueba')
+  Accuracy. <- c(acc_svm_train,'entrenamiento')
+  AUC_ROC <- c(AUC_svm_test,'prueba')
+  AUC_ROC. <- c(AUC_svm_train,'entrenamiento')
+  # Imprimo resultados
+  kable(rbind(Métrica, Accuracy, Accuracy., AUC_ROC, AUC_ROC.))
+  }
+```
+
+Se utilizará la librería mlr, que ofrece herramientas para trabajar con experimentos
+de machine learning. En el caso de svm, mlr utiliza las funciones del paquete
+e1071.
+
+Daremos un primer vistazo a un modelo simple con kernel lineal. Para ello se definen
+la tarea de clasificación y el modelo a ajustar. Posteriormente, se entrena el modelo
+con los datos previamente reservados par ael entrenamiento.
+
+### **MÁQUINAS DE SOPORTE VECTORIAL (SVM) con kernel lineal**
+```{r SVM Lineal 1}
+# Defino modelo SVM
+set.seed(1)
+task = makeClassifTask(data = datos_tr[-2], target = "diagnosis") 
+lrn_svmL = makeLearner("classif.svm", predict.type = "prob", par.vals = list( kernel = "linear", cost=1)) 
+mod_svmL = mlr::train(lrn_svmL, task)
+```
+
+Calcularemos nuestras primeras métricas sobre este modelo, para conocer el desempeño
+
+```{r SVM Lineal 1 - Métricas}
+metricas(mod_svmL, datos_tr[-2], datos_te[-2], 'SVM con Kernel Lineal')
+```
+
+
+¿Cómo se ve la frontera de decisión para este clasificador? Dada la dimensionalidad
+de nuestro dataset, no es posible observarla de manera directa. A modo ilustrativo,
+haremos una reducción de la dimensionalidad a través del cómputo de las Componentes
+Principales.
+
+
+#### **Visualización de la frontera de decisión para un kernel lineal**
+```{r PCA}
+# Preparo los datos para análisis de componentes principales
+datos_para_acp = data[c(3:7)] # todas las variables numéricas
+datos.pc = prcomp(datos_para_acp,scale = TRUE) #escalo los datos
+summary(datos.pc)
+```
+Conservaremos sólo las dos primeras componentes, con relativa tranquilidad de capturar
+con ellas casi el 74% de la varianza de los datos -más que suficiente para un análisis
+ilustrativo.
+
+```{r PCA - Preparar para clasificar}
+data_toplot = datos.pc$x[,c('PC1','PC2')]
+data_toplot = data.frame(data_toplot, data[,'diagnosis'])
+colnames(data_toplot) = c('PC1','PC2', 'diagnosis')
+```
+
+Definiremos una pequeña función para crear una grilla de datos. Con ella, generaremos
+datos espaciados uniformemente y cubriendo la totalidad del rango de nuestras variables
+en la muestra estudiada. Luego, alimentaremos nuestro clasificador con la grilla,
+y los puntos servirán de testigo para dibujar una frontera de decisión.
+
+```{r Función Make grid}
+make.grid = function(x, n = 75) {
+  grange = apply(x, 2, range)
+  x1 = seq(from = grange[1,1], to = grange[2,1], length = n)
+  x2 = seq(from = grange[1,2], to = grange[2,2], length = n)
+  expand.grid(X1 = x1, X2 = x2)
+}
+```
+
+
+
+```{r Kernel Lineal - Fronteras de Separación}
+set.seed(1)
+task = makeClassifTask(data = data_toplot, target = "diagnosis") 
+lrn_plot = makeLearner("classif.svm", predict.type = "prob", par.vals = list( kernel = "linear", cost = 1)) 
+mod_plot = mlr::train(lrn_plot, task)
+
+xgrid = make.grid(data_toplot[, c('PC1','PC2')])
+ygrid = predict(mod_plot, newdata = xgrid)
+plot(xgrid, col = c("red","green")[as.numeric(unlist(ygrid))], pch = 20, cex = .2)
+points(data_toplot[,c('PC1','PC2')], col = as.integer(data_toplot$diagnosis) + 1 , pch = 19)
+# Con esta línea, se pueden conocer los vectores de soporte
+#points(data_toplot[,c('PC1','PC2')][mod_plot$learner.model$index,], pch = 5, cex = 2) 
+```
+
+
+En esta figura, se puede ver el diagnóstico real para cada paciente. Y, además,
+gracias a nuestra grilla podemos ver la clase que el algoritmo asignaría a cualquier
+otro hipotético punto que quisiéramos incorporar.
+Los datos están relativamente condensados pero muy superpuestos. Evidentemente,
+un análisis bidimensional no es suficiente para separarlos -al menos no el obtenido
+con esta metodología.
+
+
+Los kernels que ofrece e1071, se pueden conocer a través de la función getParamSet.
+Además también, si quisiéramos, podríamos investigar los parámetros disponibles
+para acompañar a cada kernel particular, a través de este mismo objeto.
+
+```{r Kernels disponibles}
+getParamSet("classif.svm")$pars$kernel$values
+```
+
+¿Cómo se ven las fronteras de separación con otros kernels más flexibles?
+Si bien no podemos esperar una separación perfecta en dos dimensiones, quizás haya
+vectores cuyas clases reales sean mejor capturadas por otros kernels.
+
+En primer lugar, observaremos kernels polinomiales de grados entre 2 y 5.
+Ya puede verse una flexibilidad tremendamente superior al elemental kernel lineal
+aunque hay algunos puntos difíciles de capturar.
+
+```{r Kernel Polinomial - Fronteras de Separación}
+set.seed(1)
+for(i in 2:5){
+  task = makeClassifTask(data = data_toplot, target = "diagnosis") 
+  lrn_plot = makeLearner("classif.svm", predict.type = "prob", par.vals = list( kernel = "polynomial", degree=i, cost = 1)) 
+  mod_plot = mlr::train(lrn_plot, task)
+  
+  xgrid = make.grid(data_toplot[, c('PC1','PC2')])
+  ygrid = predict(mod_plot, newdata = xgrid)
+  plot(xgrid, col = c("red","green")[as.numeric(unlist(ygrid))], pch = 20, cex = .2)
+  points(data_toplot[,c('PC1','PC2')], col = as.integer(data_toplot$diagnosis) + 1 , pch = 19)
+} 
+```
+
+
+¿Cuál es el efecto del parámetro C? Observaremos un barrido entre unos pocos valores
+del parámetro, para un kernel polinomial de grado 4.
+Marca la diferencia entre un ajuste más suave o más estricto.
+
+```{r Kernel Polinomial - Efecto del parámetro C}
+set.seed(1)
+for(i in 2:5){
+  task = makeClassifTask(data = data_toplot, target = "diagnosis") 
+  lrn_plot = makeLearner("classif.svm", predict.type = "prob", par.vals = list( kernel = "polynomial", degree=4, cost = i)) 
+  mod_plot = mlr::train(lrn_plot, task)
+  
+  xgrid = make.grid(data_toplot[, c('PC1','PC2')])
+  ygrid = predict(mod_plot, newdata = xgrid)
+  plot(xgrid, col = c("red","green")[as.numeric(unlist(ygrid))], pch = 20, cex = .2)
+  points(data_toplot[,c('PC1','PC2')], col = as.integer(data_toplot$diagnosis) + 1 , pch = 19)
+} 
+```
+
+
+
+A continuación, observaremos las fronteras que describe el kernel Radial. Aprovecharemos,
+simultáneamente, para tener una noción gráfica del efecto del parámetro gamma.
+Si recordamos la ecuación que define la función del kernel radial, podemos esperar
+una influencia menor de la distancia entre dos puntos cuanto más grande es gamma
+
+Puede observarse todavía más flexibilidad que en el caso polinomial, y se ve claramente
+cómo varia la frontera ante el barrido de gamma.
+Se muestran valores de gamma entre 1 y 6, para un valor constante de C. El efecto
+de localidad es mayor cada vez.
+
+```{r Kernel Radial - Fronteras de decisión y parámetro Gamma}
+for(i in 1:6){
+  set.seed(1)
+  task = makeClassifTask(data = data_toplot, target = "diagnosis") 
+  lrn_plot = makeLearner("classif.svm", predict.type = "prob", par.vals = list( kernel = "radial", cost=0.8, gamma = i)) 
+  mod_plot = mlr::train(lrn_plot, task)
+  
+  xgrid = make.grid(data_toplot[, c('PC1','PC2')])
+  ygrid = predict(mod_plot, newdata = xgrid)
+  plot(xgrid, col = c("red","green")[as.numeric(unlist(ygrid))], pch = 20, cex = .2)
+  points(data_toplot[,c('PC1','PC2')], col = as.integer(data_toplot$diagnosis) + 1 , pch = 19)
+}
+  #points(datos_tr[,c(x1,x2)][mod_plot$learner.model$index,], pch = 5, cex = 2)
+```
+
+
+Finalmente, observaremos la frontera del kernel Sigmoide. La curva que dibuja
+es altamente flexible, pero no ha capturado alunos puntos específicos ¿Será posible 
+obtener un mejor ajuste?
+
+```{r}
+
+set.seed(1)
+task = makeClassifTask(data = data_toplot, target = "diagnosis") 
+lrn_plot = makeLearner("classif.svm", predict.type = "prob", par.vals = list( kernel = "sigmoid", cost=2, gamma = 0.5)) 
+mod_plot = mlr::train(lrn_plot, task)
+
+xgrid = make.grid(data_toplot[, c('PC1','PC2')])
+ygrid = predict(mod_plot, newdata = xgrid)
+plot(xgrid, col = c("red","green")[as.numeric(unlist(ygrid))], pch = 20, cex = .2)
+points(data_toplot[,c('PC1','PC2')], col = as.integer(data_toplot$diagnosis) + 1 , pch = 19)
+
+  #points(datos_tr[,c(x1,x2)][mod_plot$learner.model$index,], pch = 5, cex = 2)
+```
+
+### Búsqueda de Hiperparámetros
+La definición de C, gamma, el grado -para polinomiales- e incluso el kernel óptimo a utilizar
+puede hacerse a través de una búsqueda por grilla, aleatoria o bayesiana.
+A modo de ejemplo, buscaremos el set óptimo de parámetros con una búsqueda aleatoria y cross
+validation.
+
+El paquete mlr nos sirve en este caso para ejecutar el flujo de trabajo de forma
+compacta y ordenada.
+Definida la tarea y el clasificador, definimos el espacio de búsqueda paramétrica.
+Luego, definimos la estrategia de búsqueda y cv.
+
+```{r Búsqueda de Hiperparámetros}
+# Tarea y clasificador
+task = makeClassifTask(data = datos_tr[-2], target = "diagnosis") 
+svm <- makeLearner("classif.svm")
+
+# Parámetros a optimizar
+kernels <- c("polynomial", "radial", "sigmoid")
+svmParamSpace <- makeParamSet(
+  makeDiscreteParam("kernel", values = kernels),
+  makeIntegerParam("degree", lower = 1, upper = 3),
+  makeNumericParam("cost", lower = 0.1, upper = 10),
+  makeNumericParam("gamma", lower = 0.1, 10))
+
+# Esquema de búsqueda
+randSearch <- makeTuneControlRandom(maxit = 30)
+cvForTuning <- makeResampleDesc("Holdout", split = 2/3)
+
+#Parámetros óptimos
+tunedSvmPars <- tuneParams("classif.svm", task = task,
+                     resampling = cvForTuning,
+                     par.set = svmParamSpace,
+                     control = randSearch)
+```
+
+La salida nos indica la mejor combinación, para esta estrategia y espacio de búsqueda con
+30 iteraciones.
+
+[Tune] Result: kernel=radial; degree=1; cost=3.37; gamma=2.96 : mmce.test.mean=0.0786517
+
+A continuación pondremos a prueba el desempeño de varios clasificadores, incluído el 
+que reúne los parámetros óptimos. Contrastaremos su desempeño con el de una regresión
+logística. Ahora, sobre el problema original y no su versión reducida.
+
+Calcularemos, para cada modelo:
+1. Curvas de Accuracy para diferentes thresholds, en sets de entrenamiento y prueba.
+2. Curvas ROC en los mismos sets. AUC será nuestra medida de mayor interés.
+
+### **MÁQUINAS DE SOPORTE VECTORIAL (SVM) con kernel lineal**
+```{r SVM Lineal - Clasificación}
+# Defino modelo SVM
+set.seed(1)
+task = makeClassifTask(data = datos_tr[-2], target = "diagnosis") 
+lrn_svmL = makeLearner("classif.svm", predict.type = "prob", par.vals = list( kernel = "linear", cost=1)) 
+mod_svmL = mlr::train(lrn_svmL, task)
+metricas(mod_svmL, datos_tr[-2], datos_te[-2], 'SVM con Kernel Lineal')
+
+```
+
+
+Kernel Lineal: AUC_ROC	0.891	prueba
+
+### **MÁQUINAS DE SOPORTE VECTORIAL (SVM) con kernel Polinomial**
+
+```{r SVM Polinomial - Clasificación}
+set.seed(1)
+task = makeClassifTask(data = datos_tr[-2], target = "diagnosis") 
+lrn_svmP = makeLearner("classif.svm", predict.type = "prob", par.vals = list( kernel = "polynomial", cost=2 , degree=3)) 
+mod_svmP = mlr::train(lrn_svmP, task)
+metricas(mod_svmP, datos_tr[-2], datos_te[-2], 'SVM con Kernel Polinomial (grado 3)')
+```
+
+
+
+Kernel Polinomial: AUC_ROC	0.895	prueba
+
+
+
+### **MÁQUINAS DE SOPORTE VECTORIAL (SVM) con kernel radial**
+Parámetros óptimos:
+[Tune] Result: kernel=radial; degree=1; cost=3.37; gamma=2.96 
+
+```{r SVM Radial - Clasificación}
+# Defino modelo SVM
+set.seed(1)
+task = makeClassifTask(data = datos_tr[-2], target = "diagnosis") 
+lrn_svmR = makeLearner("classif.svm", predict.type = "prob", par.vals = list( kernel = "radial", cost=3.37, gamma =2.96)) 
+mod_svmR = mlr::train(lrn_svmR, task)
+metricas(mod_svmR, datos_tr[-2], datos_te[-2], 'Radial')
+```
+
+
+### **REGRESIÓN LOGÍSTICA**
+```{r regresión logística}
+# chequeo el balance de las distintas clases de  la variable diagnóstico en el conjunto de todos los datos, los datos de prueba y los datos de entramiento.
+Entrenamiento <- table(datos_tr$diagnosis) #126 normal, 140 maligno
+Prueba <- table(datos_te$diagnosis) # 57 normal, 58 maligno
+Total <- table(data$diagnosis) # 183 normal, 198 maligno
+kable(rbind(Entrenamiento, Prueba,Total))
+# Armo modelo de regresión logistica. 
+set.seed(1)
+task = makeClassifTask(data = datos_tr[-2], target = "diagnosis") 
+lrn = makeLearner("classif.logreg", predict.type = "prob")
+mod_lr = mlr::train(lrn, task)
+metricas(mod_lr, datos_tr[-2], datos_te[-2], 'Logística')
+kable(mod_lr$learner.model$coefficients)
+```
+
+
+### **COMPARACIÓN DE MÉTODOS DE CLASIFICACIÓN SUPERVISADA**
+
+Finalmente, compararemos las métricas calculadas sobre el desempeño de todos
+los modelos construídos.
+
+```{r todos ROC}
+# ······················ curvas ROC para todos los modelos ········································
+pred_lr = predict(mod_lr, newdata = datos_te[-2])
+pred_svmL = predict(mod_svmL, newdata = datos_te[-2])
+pred_svmP = predict(mod_svmP, newdata = datos_te[-2])
+pred_svmR = predict(mod_svmR, newdata = datos_te[-2])
+
+df_todos = generateThreshVsPerfData(list(lg=pred_lr, svmL = pred_svmL, svmP = pred_svmP, svmR = pred_svmR), measures = list(fpr, tpr, mmce))
+
+plotROCCurves(df_todos) + theme + 
+        labs(title='Curvas ROC de modelos de clasificación supervisada (datos de prueba)',
+             x='Tasa de falsos positivos (FPR)', y='Tasa de positivos verdaderos (TPR)', 
+             color=' Modelo en\n evaluación') +
+        scale_color_manual(values = c("red", "black", "blue", "darkgreen"),
+                           labels=c('Reg log','SVM (lineal)','SVM (polinomial)','SVM (radial)'))+
+        theme(legend.position=c(0.915,0.25))
+# ············ valores AUC para todos los modelos cuando se consideran todas las variables ···················
+AUC_lg_te <- round(measureAUC(as.data.frame(pred_lr)$prob.maligno, as.data.frame(pred_lr)$truth, 'normal','maligno'),3)
+AUC_svm_teL <- round(measureAUC(as.data.frame(pred_svmL)$prob.maligno, as.data.frame(pred_svmL)$truth, 'normal','maligno'),3)
+AUC_svm_teP <- round(measureAUC(as.data.frame(pred_svmP)$prob.maligno, as.data.frame(pred_svmP)$truth, 'normal','maligno'),3)
+AUC_svm_teR <- round(measureAUC(as.data.frame(pred_svmR)$prob.maligno, as.data.frame(pred_svmR)$truth, 'normal','maligno'),3)
+
+AUC_values <- rbind(AUC_lg_te, AUC_svm_teL,  AUC_svm_teP,  AUC_svm_teR)
+AUC_values <- as.data.frame(AUC_values)
+AUC_values$Modelo <- c('Reg Log','SVM L','SVM P','SVM R')
+colnames(AUC_values) <- c('Area debajo de la curva (AUC)','Modelo')
+row.names(AUC_values) <- NULL
+AUC_values <- AUC_values%>%dplyr::select(2,1)
+# Imprimo resultados
+kable(AUC_values)
+```
+
+Con un AUC de 0.902 sobre el set de test, el Kernel radial es superior. Las diferencias
+en rendimientos, con esta configuración, no son demasiado grandes.
+El paso siguiente, sería comparar el rendimiento luego de una búsqueda exhaustiva
+de hiperparámetros para todos los modelos.
+
+Específicamente, el "costo" principal de SVM tiene que ver con la pérdida de interpretabilidad
+directa.
+
+
+Nota Bibliográfica
+Snippets de código fueron basados en:
+1. https://www.r-bloggers.com/2019/10/support-vector-machines-with-the-mlr-package/
+2. https://www.datacamp.com/community/tutorials/support-vector-machines-r

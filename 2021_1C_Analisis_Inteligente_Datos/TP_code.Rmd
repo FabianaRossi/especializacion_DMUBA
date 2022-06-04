@@ -1,0 +1,2273 @@
+---
+title: "Trabajo práctico AID 2021"
+subtitle: "Maestría en Exploración de Datos y Descubrimiento del Conocimiento"
+author: "Fabiana A Rossi"
+date: "12/8/2021"
+output: html_document
+---
+
+### Cargo librerías
+```{r libraries, include=F}
+knitr::opts_chunk$set(echo = TRUE)
+# ALTERNATIVA NORMAL VS TUMORAL CON menos datos
+library(mlr)
+library(BSDA)
+library(viridisLite)
+library(xlsx)
+library(dplyr)
+library(ggplot2)
+# install_github("vqv/ggbiplot")
+library(ggbiplot)
+library(GGally)
+library(nortest)
+library(ggforce)
+# if (!requireNamespace("BiocManager", quietly = TRUE))
+        #install.packages("BiocManager")
+# BiocManager::install("scde")
+library(scde)
+library(devtools)
+library(geoR)
+library(mvnormtest)
+library(MASS)
+library(npmv)
+library(klaR)
+library(reshape)
+library(lattice)
+# install.packages( c("xts","quantmod") )        
+# install.packages("DMwR_0.4.1.tar.gz")
+library(DMwR) 
+library(pgirmess)
+library(Rtsne)
+library(pracma)
+library(e1071)
+library(nnet)
+library(cluster)
+library(gridExtra)
+library(cowplot)
+# remotes::install_github("trevorld/gridpattern")
+# remotes::install_github("coolbutuseless/ggpattern")
+library(ggpattern)
+library(ggpubr)
+library(scatterplot3d)  
+library(biotools)
+library(corpcor)
+library(Hotelling)
+library(DescTools)
+library(car)
+library(knitr)
+# library(vegan) # si la cargo, empieza a hacerme lío con el paquete mlr y klaR!!
+# install.packages("dendextend")
+library(dendextend)
+library(magrittr)
+library(googlesheets)
+# remotes::install_github("andrewheiss/reconPlots")
+library(reconPlots)
+library(tidyr)
+```
+
+### Creo tema general para los gráficos
+```{r theme, include=T}
+theme <- theme(text = element_text(size=10),plot.title = element_text(size=12, face="bold.italic",
+               hjust = 0.5), axis.title.x = element_text(size=10, face="bold", colour='black'),
+               axis.title.y = element_text(size=10, face="bold"),panel.border = element_blank(),
+               panel.grid.major = element_blank(), panel.grid.minor = element_blank(), legend.title = element_text(face="bold"))
+```
+
+### Cargo datos 
+```{r data} 
+#id <- '11wXwKESJrMw6_hqljbOzpn7ncXPjNWeV' # nombre del archivo en google drive
+#data <- read.csv(sprintf("https://docs.google.com/uc?id=%s&export=download", id))
+data <- read.csv('pancreas.csv')
+```
+
+### Preprocesamiento de la base de datos
+```{r procesamiento}
+# Cambio el nombre de las variables a español
+colnames(data) <- c('id','cohorte','origen','edad','sexo','diagnosis','estadio','diagnosis_benigno','plasma_CA19_9','creatinina','LYVE1','REG1B','TFF1','REG1A')
+# Elijo normal y maligno, y renombro 1=normal, 3=maligno
+data <- data %>% filter ( diagnosis=='1' | diagnosis=='3')
+data <- data %>% mutate(diagnosis = sub("1", "normal", diagnosis))
+data <- data %>% mutate(diagnosis = sub("3", "maligno", diagnosis))
+# Transformo como factor
+data$sexo <- as.factor(data$sexo)
+data$diagnosis <- factor(data$diagnosis, levels= c('normal','maligno'))
+# Me quedo sólo con columnas: edad,sexo,diagnosis,creatinina,LYVE1,REG1B,TFF1 y las reordeno
+data <- data %>% dplyr::select(6,5,4,10:13) 
+# Imprimo tabla
+kable(data.frame(variable = names(data),
+           class = sapply(data, class),
+           primeros_valores = sapply(data, function(x) paste0(head(x),  collapse = ", ")),
+           row.names = NULL))
+```
+
+### Análisis exploratorio de las variables 
+#### **Análisis exploratorio de las variables y correlaciones de acuerdo al valor de la variable diagnóstico (gráficos)**
+```{r AnálisisExploratorio}
+# Gráfico ggpairs
+data%>% ggpairs(.,mapping=ggplot2::aes(color = diagnosis,alpha = 0.1),
+        upper = list(continuous = wrap("cor", size = 2.5),discrete = "blank", combo="blank"),
+        lower = list(combo = "box"),progress = F)+
+        theme+
+        labs(title= 'Descripción de variables en la base de datos', x='Variable', y='Variable')+
+        scale_fill_manual(values=c('royalblue2','red'))+
+        scale_color_manual(values=c('royalblue2','#ff7474ff'))
+```
+
+#### **Análisis exploratorio de las variables de manera individual, agrupadas por diagnóstico y sexo**
+```{r AnálisisExploratorio 2}
+# gráficos para cada una de las variables por separado, de acuerdo al diagnóstico y sexo
+# ················ EDAD ········································································
+g1 <- ggplot(data = data, aes(x = diagnosis, fill = diagnosis, pattern = sexo, y= edad)) + 
+        theme +
+        geom_boxplot_pattern(position = position_dodge(preserve = "single"),
+                         color = "black", pattern_fill = "black",
+                         pattern_angle = 45,pattern_density = 0.1,
+                         pattern_spacing = 0.025, pattern_key_scale_factor = 0.6, 
+                         outlier.shape =  1, outlier.colour = 'darkgray') + 
+        scale_fill_manual(values = c('royalblue2','#ff7474ff')) +
+        scale_pattern_manual(values = c(F = "none", M = "stripe")) +
+        labs(title='EDAD') +
+        theme(legend.position = 'blank', axis.title.x=element_blank(),
+              axis.title.y=element_blank(),text = element_text(size=10),
+              plot.title = element_text(size=10, face='plain', hjust = 0.5)) +
+        guides(pattern = guide_legend(override.aes = list(fill = "white")),
+               fill = guide_legend(override.aes = list(pattern = "none")))
+# ················ CREATININA ·································································
+g2 <- ggplot(data = data, aes(x = diagnosis, fill = diagnosis, pattern = sexo, y= creatinina)) +
+        theme +
+        geom_boxplot_pattern(position = position_dodge(preserve = "single"),
+                             color = "black", pattern_fill = "black",
+                             pattern_angle = 45,pattern_density = 0.1,
+                             pattern_spacing = 0.025, pattern_key_scale_factor = 0.6,
+                             outlier.shape =  1, outlier.colour = 'darkgray') + 
+        scale_fill_manual(values = c('royalblue2','#ff7474ff')) +
+        scale_pattern_manual(values = c(F = "none", M = "stripe")) +
+        labs(title='CREATININA') +
+        theme(legend.position = 'blank', axis.title.x=element_blank(),
+              axis.title.y=element_blank(),text = element_text(size=10),
+              plot.title = element_text(size=10, face='plain', hjust = 0.5)) +
+        guides(pattern = guide_legend(override.aes = list(fill = "white")),
+               fill = guide_legend(override.aes = list(pattern = "none")))
+# ················ LYVE1 ······································································
+g3 <- ggplot(data = data, aes(x = diagnosis, fill = diagnosis, pattern = sexo, y= LYVE1)) +
+        theme +
+        geom_boxplot_pattern(position = position_dodge(preserve = "single"),
+                             color = "black", pattern_fill = "black",
+                             pattern_angle = 45, pattern_density = 0.1,
+                             pattern_spacing = 0.025, pattern_key_scale_factor = 0.6,
+                             outlier.shape =  1, outlier.colour = 'darkgray') + 
+        scale_fill_manual(values = c('royalblue2','#ff7474ff')) +
+        scale_pattern_manual(values = c(F = "none", M = "stripe")) +
+        labs(title='LYVE1')+
+        theme(legend.position = 'blank', axis.title.x=element_blank(),
+              axis.title.y=element_blank(),text = element_text(size=10),
+              plot.title = element_text(size=10, face='plain', hjust = 0.5)) +
+        guides(pattern = guide_legend(override.aes = list(fill = "white")),
+               fill = guide_legend(override.aes = list(pattern = "none")))
+# ················ REG1B ···································································
+g4 <- ggplot(data = data, aes(x = diagnosis, fill = diagnosis, pattern = sexo, y= REG1B)) +
+        theme +
+        geom_boxplot_pattern(position = position_dodge(preserve = "single"),
+                             color = "black", pattern_fill = "black",
+                             pattern_angle = 45,pattern_density = 0.1,
+                             pattern_spacing = 0.025,pattern_key_scale_factor = 0.6,
+                             outlier.shape =  1, outlier.colour = 'darkgray') + 
+        scale_fill_manual(values = c('royalblue2','#ff7474ff')) +
+        scale_pattern_manual(values = c(F = "none", M = "stripe")) +
+        labs(title='REG1B') +
+        theme(legend.position = 'blank', axis.title.x=element_blank(),
+              axis.title.y=element_blank(),text = element_text(size=10),
+              plot.title = element_text(size=10, face='plain',hjust = 0.5)) +
+        guides(pattern = guide_legend(override.aes = list(fill = "white")),
+               fill = guide_legend(override.aes = list(pattern = "none")))
+# ················ TFF1 ·································································
+g5 <- ggplot(data = data, aes(x = diagnosis, fill = diagnosis, pattern = sexo, y= TFF1)) + 
+        theme +
+        geom_boxplot_pattern(position = position_dodge(preserve = "single"),
+                             color = "black", pattern_fill = "black",
+                             pattern_angle = 45,pattern_density = 0.1,
+                             pattern_spacing = 0.025,pattern_key_scale_factor = 0.6,
+                             outlier.shape =  1, outlier.colour = 'darkgray') + 
+        scale_fill_manual(values = c('royalblue2','#ff7474ff')) +
+        scale_pattern_manual(values = c(F = "none", M = "stripe")) +
+        labs(title='TFF1', fill='Diagnóstico', pattern='Sexo') +
+        theme(legend.position = c(1.8,0.5), axis.title.x=element_blank(),
+              axis.title.y=element_blank(),text = element_text(size=10),
+              plot.title = element_text(size=10, face='plain',hjust = 0.5)) +
+        guides(pattern = guide_legend(override.aes = list(fill = "white")),
+               fill = guide_legend(override.aes = list(pattern = "none")))
+# ············ JUNTO TODOS LOS GRAFICOS ···············································
+title1=text_grob(label='Análisis exploratorio de las variables', size = 14, face = "bold.italic")
+titlex=text_grob(label='Variable', size = 12, face = "bold")   
+
+grid.arrange(g1, g2, g3, g4, g5, top = title1, bottom=titlex, ncol=3)
+```
+
+#### **Análisis univariado de cada variable agrupado por diagnóstico- (Normalidad)**
+```{r qqplot univariado para cada grupo}
+# Creo dataframes de acuerdo al diagnóstico
+data_n <- data%>%filter(diagnosis=='normal')
+data_m <- data%>%filter(diagnosis=='maligno')
+# Realizo un qqplot de cada una de las variables numéricas, y calculo normalidad univariada por Anderson Darling (para diagnóstico NORMAL)
+par(mfrow = c(2,5))
+pval = list() 
+for (k in 3:7) {qqnorm(data_n[,k],main = names(data_n[k]),xlab = "Cuant. teóricos", 
+                       ylab = "Cuantiles muestra\ndiagnóstico NORMAL",col='royalblue2')
+        qqline(data_n[,k],col="black") 
+        pval[k] = ad.test(data_n[,k])$p.value}
+# Calculo p-valor de test de normalidad univariada para datos con diagnóstico "NORMAL" 
+df <- data.frame(matrix(unlist(as.list(colnames(data_n)[3:7])),
+                        nrow=length(as.list(colnames(data_n)))-2, byrow=TRUE))
+df1 <- data.frame(matrix(unlist(pval[3:7]), nrow=length(pval)-2, byrow=TRUE))
+j <- cbind(df,df1)
+colnames(j) <- c('variable','p.valor normal')
+# ···························································································
+# Realizo un qqplot de cada una de las variables numéricas, y calculo normalidad univariada por Anderson Darling (para diagnóstico MALIGNO)
+pval2 = list() 
+for (k in 3:7) {qqnorm(data_m[,k],main = names(data_m[k]),xlab = "Cuant. teóricos", ylab = "Cuantiles muestra\ndiagnóstico MALIGNO", col='#ff7474ff')
+        qqline(data_m[,k],col="black") 
+        pval2[k] = ad.test(data_m[,k])$p.value}
+# Calculo p-valor de test de normalidad univariada para datos con diagnóstico "MALIGNO" 
+df2 <- data.frame(matrix(unlist(as.list(colnames(data_m)[3:7])),
+                        nrow=length(as.list(colnames(data_m)))-2, byrow=TRUE))
+df12 <- data.frame(matrix(unlist(pval2[3:7]), nrow=length(pval2)-2, byrow=TRUE))
+j2 <- cbind(df2,df12)
+colnames(j2) <- c('variable','p.valor maligno')
+j2 <- j2%>%dplyr::select(2)
+# ···························································································
+# Imprimo resultados de ambos grupos
+kable(cbind(j,j2))
+```
+
+### Reducción del espacio de representación de los datos mediante Análisis de Componentes Principales (PCA)
+```{r PCA}
+# Preparo los datos para análisis de componentes principales
+datos_para_acp = data[c(3:7)] # todas las variables numéricas
+datos.pc = prcomp(datos_para_acp,scale = TRUE) #escalo los datos
+#grafico
+ggbiplot(datos.pc, obs.scale=0.1 ,var.scale=1,alpha=0.5,
+         groups=factor(data$diagnosis)) +
+        scale_color_manual(name="diagnosis",values=c('royalblue2','#ff7474ff'),
+                           labels=c("normal",'maligno')) +
+        theme + labs(title='Análisis de componentes principales') + 
+        theme(legend.position=c(.85,.15)) + 
+        labs(x='PC1 (51.5% explicado)', y= 'PC2 (22.5% explicado)')
+```
+
+### Análisis estadístico de las variables
+#### **Análisis de normalidad**
+```{r AnálisisNormalidad}
+# Analizo normalidad multivariada y multivariada por grupo con Shapiro Wilks
+pval_all <- mshapiro.test(t(data[,3:7]))
+pval_normal <- mshapiro.test(t(data%>%dplyr::filter(diagnosis=="normal")%>% dplyr::select(3:7)))
+pval_maligno <- mshapiro.test(t(data%>%dplyr::filter(diagnosis=="maligno")%>% dplyr::select(3:7)))
+
+ShapiroW_p.valor <- c(pval_all$p.value, pval_normal$p.value, pval_maligno$p.value)
+Datos <- c('todos','subset normal', 'subset maligno')
+
+# Imprimo resultados de normalidad multivariada total y por grupos (estos últimos son relevantes)
+kable(cbind(Datos,ShapiroW_p.valor))
+```
+
+#### **Análisis de Homocedasticidad (BoxM)**
+```{r AnálisisHomocedasticidad BoxM}
+# Analizo igualdad de matrices de varianzas y covarianzas con boxM
+p.valor <- boxM(data = data[, 3:7], grouping = data[, 1])$p.value
+Test <- boxM(data = data[, 3:7], grouping = data[, 1])$method
+
+# Imprimo resultados de test
+kable(cbind(Test, p.valor))
+```
+#### **Análisis de Homocedasticidad (Levene)**
+```{r AnálisisHomocedasticidad Levene}
+# Como boxM es sensible a la falta de normalidad, aplico Levene utilizando betadisper del paquete "vegan" (equivalente a levene, pero multivariado)
+
+# como el paquete vegan y el paquete klaR (RDA) crashean cuando están cargados en simultáneo, guardo en un objeto al p-valor de la prueba. No obstante, dejo el código por si se lo quiere correr (si se corren secuencialmente en RMD no hay problema, el problema es al generar el html file con KNIT)
+
+# ············ CODIGO ·············
+#matriz_de_distancias <- vegan::betadisper(dist(data[, 3:7], method='euclidean'), data$diagnosis, type = c("median","centroid"), bias.adjust = T,sqrt.dist = FALSE, add = FALSE)
+# test_levene <- anova(matriz_de_distancias)
+# p.valor <- test_levene$`Pr(>F)`[1]
+# TukeyHSD(matriz_de_distancias)
+# plot(matriz_de_distancias)
+# ·································
+
+p.valor <- 9.604574e-13 # este valor se asigna manualmente por lo indicado más arriba
+Test <- 'Levene'
+
+# Imprimo resultado del test
+kable(cbind(Test,p.valor))
+```
+
+#### **Comparación del vector de medias (Test Hotelling T2, normal asintótico)**
+```{r Diferencias vector medias HOTELLING}
+# Analizo cómo me da Hotelling para ver diferencias en el vector de medias de cada grupo
+HOTELLING <- HotellingsT2Test(as.matrix(data[,-c(1,2)]) ~ diagnosis, data =data)
+Test <- HOTELLING$method
+p.valor <- HOTELLING$p.value[1]
+
+# Imprimo resultados en una tabla
+kable(cbind(Test, p.valor ))
+```
+
+#### **Comparación del vector de medias (Test npmv, no paramétrico)**
+```{r Diferencias vector medias npmv, warning=FALSE}
+# se utiliza el paquete npmv no paramétrico para comparar vector de medias. (Nonparametric Inference for Multivariate Data: R Package npmv, January 2017, Volume 76, Issue 4. doi: 10.18637/jss.v076.i04, https://www.jstatsoft.org/article/view/v076i04)
+
+noparam <- nonpartest(creatinina | LYVE1 | REG1B | TFF1 | edad ~ diagnosis, data = data, permreps = 1000, plots=F) 
+p.valor <- noparam$results$`P-value`[1]
+Test <- 'No paramétrico multivariado (npmv)'
+
+# Imprimo el resultado
+kable(cbind(Test, p.valor ))
+# ·························· POST TESTS ··································································
+#ssnonpartest(creatinine | LYVE1 | REG1B | TFF1 | age ~ diagnosis, data = data,test = c(1, 0, 0, 0), alpha = 0.05, factors.and.variables = TRUE) # para ver comparaciones posteriores
+```
+
+### Procesamiento: Separación de conjunto de entrenamiento (train) y prueba (test) [70:30]
+```{r separación test y train}
+set.seed(1409) # para asegurar reproducibilidad
+dt = sort(sample(nrow(data), nrow(data)*.7))
+datos_tr<-data[dt,]
+datos_te<-data[-dt,]
+```
+
+### Escalado de los datos 
+```{r Escalado}
+# Se realiza el escalado/estandarización con ->  (x - mean(x)) / sd(x)
+
+# Calculo media y sd de subconjunto de entrenamiento (train), y con esos datos hago el escalado del test. La idea de escalar el conjunto de test (prueba) utilizando datos solamente de train es para evitar el data leakeage.
+
+# Hago escalado a mano del test set con media del training, y sd del training
+for (k in 3:7){datos_te[,k]=(datos_te[,k]-mean(datos_tr[,k]))/sd(datos_tr[,k])}
+# Hago automáticamente con la función scale, el escalado de training, y le vuelvo a sumar las columnas sex y diagnosis 
+datos_tr = as.data.frame(scale(datos_tr[,3:7]))
+datos_tr$diagnosis <- data[dt,]$diagnosis
+datos_tr$sexo <- data[dt,]$sexo
+# y las pongo en = orden que testset
+datos_tr <- datos_tr%>%dplyr::select(6,7,1:5)
+# creo una única df con todos los datos escalados (que usaré luego para clustering)
+datos_escalados <- as.data.frame(scale(data[,3:7]))
+datos_escalados$diagnosis <- data$diagnosis
+datos_escalados$sexo <- data$sexo
+datos_escalados <- datos_escalados%>%dplyr::select(6,7,1:5)
+```
+
+-----------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------
+
+# MÉTODOS DE CLASIFICACIÓN SUPERVISADA
+### **ANÁLISIS DE DISCRIMINANTE LINEAL (LDA)**
+```{r LDA modelo}
+# No se cumple normalidad ni homocedasticidad. No obstante, analizo su rendimiento.
+
+# Defino modelo con variables numéricas
+set.seed(1)
+task = makeClassifTask(data = datos_tr[-2], target = "diagnosis") 
+lrn = makeLearner("classif.lda", predict.type = "prob")
+mod1 = mlr::train(lrn, task)
+# Predicción del TEST / Accuracy, AUC (ROC)
+pred_lda= predict(mod1, newdata = datos_te[-2])
+acc_lda1= round(measureACC(as.data.frame(pred_lda)$truth, as.data.frame(pred_lda)$response),3)
+AUC_lda_te <- round(measureAUC(as.data.frame(pred_lda)$prob.maligno,as.data.frame(pred_lda)$truth,'normal','maligno'),3)
+# ···························································································
+# Predicción del TRAIN (ingenua o naive) / Accuracy, AUC (ROC)
+pred_lda2 = predict(mod1, newdata = datos_tr[-2]) # por si quiero ver naive sobre training
+acc_lda2 = round(measureACC(as.data.frame(pred_lda2)$truth, as.data.frame(pred_lda2)$response),3)
+AUC_lda_tr <- round(measureAUC(as.data.frame(pred_lda2)$prob.maligno,as.data.frame(pred_lda2)$truth, 'normal','maligno'),3)
+# ···························································································
+# Cambio el threshold [esto lo hago para train y test] y grafico para ver cuál elegiría si la métrica que me interesa es Accuracy, por ejemplo
+acc=NULL
+acc2=NULL
+threshold = seq(0.1,0.95,0.01)
+for (i in 1:length(threshold)) {
+        pred = setThreshold(pred_lda, threshold = threshold[i])
+        acc[i] = measureACC(as.data.frame(pred)$truth, as.data.frame(pred)$response)}
+for (i in 1:length(threshold)) {
+        pred2 = setThreshold(pred_lda2, threshold = threshold[i])
+        acc2[i] = measureACC(as.data.frame(pred2)$truth, as.data.frame(pred2)$response)}
+
+new_df1 <- as.data.frame(cbind(threshold,acc))
+new_df1 <- new_df1%>%mutate(sub_data='test')
+new_df2 <- as.data.frame(cbind(threshold,acc2))
+colnames(new_df2) <- c('threshold','acc')
+new_df2 <- new_df2%>%mutate(sub_data='train')
+
+new_df <- as.data.frame(rbind(new_df1,new_df2))
+# new_df1[which.max(new_df1$acc),"threshold"] # 0.47 (máximo de test)
+# new_df2[which.max(new_df2$acc),"threshold"] # 0.52 (máximo de train)
+# ···························································································
+# Gráfico de cómo varía la métrica de performance accuracy, de acuerdo al umbral elegido
+ggplot(new_df, aes(x=threshold, y=acc)) + 
+        geom_line(aes(color = sub_data,linetype=sub_data)) +
+        theme + 
+        labs(x='Umbral', y='Métrica de performance (accuracy)',
+             title= 'Evaluación del modelo de discriminante lineal LDA') +
+        scale_color_manual(values = c("red", "darkred"),labels=c('prueba','entrenamiento')) +
+        scale_linetype_manual(values=c(1,2), labels=c('prueba','entrenamiento')) + 
+        labs(color='Conjunto de\n evaluación',linetype='Conjunto de\n evaluación')
+# Para independizarnos de la elección del umbral, grafico curvas ROC para las predicciones del modelo LDA con los datos de TEST y TRAIN
+df_lda = generateThreshVsPerfData(list(lda_te = pred, lda_tr = pred2), 
+                                  measures = list(fpr, tpr, mmce))
+plotROCCurves(df_lda) + theme + 
+        labs(title='Curva ROC del modelo discriminante lineal LDA', x='Tasa de falsos positivos (FPR)',
+             y='Tasa de positivos verdaderos (TPR)', color='Conjunto de\n evaluación') +
+        scale_color_manual(values = c("red", "darkred"), labels=c('prueba','entrenamiento')) +
+        geom_label(label="AUC= 0.860", x=0.35, y=0.75, label.size = 0.3, 
+                   size=4,color = "red",fill="white") +
+        geom_label(label="AUC= 0.910", x=0.068, y=0.95, label.size = 0.3, 
+                   size=4,color = "darkred",fill="white")
+# ················ Métricas del modelo de LDA ················
+Métrica <- c('valor','datos')
+Accuracy <- c(acc_lda1,'prueba')
+Accuracy. <- c(acc_lda2,'entrenamiento')
+AUC_ROC <- c(AUC_lda_te,'prueba')
+AUC_ROC. <- c(AUC_lda_tr,'entrenamiento')
+# Imprimo los resultados de métricas de accuracy y AUC para el conjunto de test (Prueba) o train (Entrenamiento)
+kable(rbind(Métrica, Accuracy, Accuracy., AUC_ROC, AUC_ROC.))
+```
+
+### **ANÁLISIS DE DISCRIMINANTE CUADRÁTICO (QDA)**
+```{r QDA modelo}
+# Como no se cumple homocedasticidad, tiene más sentido aplicar QDA. No obstante, no se cumple normalidad, que es un supuesto de QDA
+
+# Defino modelo
+set.seed(1)
+task = makeClassifTask(data = datos_tr[-2], target = "diagnosis")
+lrn2 = makeLearner("classif.qda", predict.type = "prob")
+mod2 = mlr::train(lrn2, task)
+# Predicción sobre TEST
+pred_qda = predict(mod2, newdata = datos_te[-2])
+acc_qda1 <- round(measureACC(as.data.frame(pred_qda)$truth, as.data.frame(pred_qda)$response),3)
+AUC_qda_te <- round(measureAUC(as.data.frame(pred_qda)$prob.maligno,as.data.frame(pred_qda)$truth,'normal','maligno'),3)
+# ···························································································
+# Predicción sobre TRAIN (ingenua)
+pred_qda2 = predict(mod2, newdata = datos_tr[-2]) # por si quiero ver naive sobre training
+acc_qda2 <- round(measureACC(as.data.frame(pred_qda2)$truth, as.data.frame(pred_qda2)$response),3)
+AUC_qda_tr <- round(measureAUC(as.data.frame(pred_qda2)$prob.maligno,as.data.frame(pred_qda2)$truth, 'normal','maligno'),3)
+# ···························································································
+# Cambio el threshold [para las métricas definidas con un umbral como accuracy]
+acc=NULL
+acc2=NULL
+threshold = seq(0.1,0.95,0.01)
+for (i in 1:length(threshold)) {
+        pred = setThreshold(pred_qda, threshold = threshold[i])
+        acc[i] = measureACC(as.data.frame(pred)$truth, as.data.frame(pred)$response)}
+for (i in 1:length(threshold)) {
+        pred2 = setThreshold(pred_qda2, threshold = threshold[i])
+        acc2[i] = measureACC(as.data.frame(pred2)$truth, as.data.frame(pred2)$response)}
+ 
+new_df1 <- as.data.frame(cbind(threshold,acc))
+new_df1 <- new_df1%>%mutate(sub_data='test')
+new_df2 <- as.data.frame(cbind(threshold,acc2))
+colnames(new_df2) <- c('threshold','acc')
+new_df2 <- new_df2%>%mutate(sub_data='train')
+
+new_df <- as.data.frame(rbind(new_df1,new_df2))
+#new_df1[which.max(new_df1$acc),"threshold"] # test 0.68
+#new_df2[which.max(new_df2$acc),"threshold"] # train 0.8
+# ···························································································
+# Gráfico de cómo varía la métrica de performance accuracy, de acuerdo al umbral elegido
+ggplot(new_df, aes(x=threshold, y=acc)) + geom_line(aes(color = sub_data,linetype=sub_data)) + theme +
+        labs(x='Umbral', y='Métrica de performance (accuracy)', 
+             title= 'Evaluación del modelo de discriminante cuadrático QDA') +
+        scale_color_manual(values = c("red", "darkred"),labels=c('prueba','entrenamiento')) +
+        scale_linetype_manual(values=c(1,2), labels=c('prueba','entrenamiento')) + 
+        labs(color='Conjunto de\n evaluación',linetype='Conjunto de\n evaluación')
+# Para independizarnos de la elección del umbral, grafico curvas ROC para las predicciones del modelo QDA con los datos de TEST y TRAIN
+df_qda = generateThreshVsPerfData(list(qda_te = pred_qda, qda_tr = pred_qda2), 
+                                  measures = list(fpr, tpr, mmce))
+
+plotROCCurves(df_qda) + theme + labs(title='Curva ROC del modelo discriminante cuadrático QDA',
+                                     x='Tasa de falsos positivos (FPR)',
+                                     y='Tasa de positivos verdaderos (TPR)', 
+                                     color='Conjunto de\n evaluación') +
+        scale_color_manual(values = c("red", "darkred"), labels=c('prueba','entrenamiento'))+
+        geom_label(label="AUC= 0.929", x=0.35, y=0.75, label.size = 0.3, size=4,
+                   color = "red",fill="white")+
+        geom_label(label="AUC= 0.923", x=0.068, y=0.95, label.size = 0.3, size=4,
+                   color = "darkred",fill="white")
+# ················ Métricas del modelo de QDA ················
+Métrica <- c('valor','datos')
+Accuracy <- c(acc_qda1,'prueba')
+Accuracy. <- c(acc_qda2,'entrenamiento')
+AUC_ROC <- c(AUC_qda_te,'prueba')
+AUC_ROC. <- c(AUC_qda_tr,'entrenamiento')
+#Imprimo resultados
+kable(rbind(Métrica, Accuracy, Accuracy., AUC_ROC, AUC_ROC.))
+```
+
+### **DISCRIMINANTE CUADRÁTICO ROBUSTO**
+```{r robusto MCD}
+#estimaciones robustas MCD
+cov_normal=cov.rob(data[data$diagnosis=="normal",c(3:7)],method="mcd",nsamp="best")
+cov_maligno=cov.rob(data[data$diagnosis=="maligno",c(3:7)],method="mcd",nsamp="best")
+prom_normal=rep(cov_normal$center,183) 
+prom_maligno=rep(cov_maligno$center,198) 
+var_normal=as.matrix (cov_normal$cov) 
+var_maligno=as.matrix (cov_maligno$cov) 
+
+data2 <- data%>%dplyr::select(3:7)
+data2N <- data2-prom_normal
+data2M <- data2-prom_maligno
+
+# Calcula las distancias de Mahalanobis robustas 
+distrob_normal= as.matrix(data2N) %*% solve(var_normal) %*% t(as.matrix (data2N)) 
+distrob_maligna= as.matrix(data2M) %*% solve(var_maligno) %*% t(as.matrix (data2M)) 
+clase=0
+for (i in 1:381) {ifelse(distrob_normal[i]<distrob_maligna[i], clase[i] <- 'normal', clase[i] <- 'maligno')} 
+
+# Clasifica con las distancias 
+print('Matriz de confusión')
+table(data$diagnosis,clase)
+valor <- round(measureACC(data$diagnosis,clase),3)
+# Imprimo resultados
+kable(cbind('Accuracy', valor))
+```
+
+### **ANÁLISIS DISCRIMINANTE REGULARIZADO (RDA)**
+```{r RDA} 
+# Este método es más robusto ante colinealidad
+set.seed(1)
+task = makeClassifTask(data = datos_tr[-2], target = "diagnosis")
+lrn3 = mlr::makeLearner("classif.rda", predict.type = "prob")
+mod3 = mlr::train(lrn3, task)
+pred_rda =predict(mod3, newdata = datos_te[-2])
+# Predicción en TEST
+acc_rda1 <- round(measureACC(as.data.frame(pred_rda)$truth, as.data.frame(pred_rda)$response),3)
+AUC_rda_te <- round(measureAUC(as.data.frame(pred_rda)$prob.maligno,as.data.frame(pred_rda)$truth,'normal','maligno'),3)
+# ···························································································
+# Predicción en TRAIN
+pred_rda2 = predict(mod3, newdata = datos_tr[-2]) # por si quiero ver naive sobre training
+acc_rda2 <- round(measureACC(as.data.frame(pred_rda2)$truth, as.data.frame(pred_rda2)$response),3)
+AUC_rda_tr <- round(measureAUC(as.data.frame(pred_rda2)$prob.maligno,as.data.frame(pred_rda2)$truth, 'normal','maligno'),3)
+# ···························································································
+# Cambio el threshold (para las métricas como accuracy, que depende de un umbral)
+acc=NULL
+acc2=NULL
+threshold = seq(0.1,0.95,0.01)
+for (i in 1:length(threshold)) {
+        pred = setThreshold(pred_rda, threshold = threshold[i])
+        acc[i] = measureACC(as.data.frame(pred)$truth, as.data.frame(pred)$response)}
+for (i in 1:length(threshold)) {
+        pred2 = setThreshold(pred_rda2, threshold = threshold[i])
+        acc2[i] = measureACC(as.data.frame(pred2)$truth, as.data.frame(pred2)$response)}
+
+new_df1 <- as.data.frame(cbind(threshold,acc))
+new_df1 <- new_df1%>%mutate(sub_data='test')
+new_df2 <- as.data.frame(cbind(threshold,acc2))
+colnames(new_df2) <- c('threshold','acc')
+new_df2 <- new_df2%>%mutate(sub_data='train')
+
+new_df <- as.data.frame(rbind(new_df1,new_df2))
+
+#new_df1[which.max(new_df1$acc),"threshold"] # test 0.48
+#new_df2[which.max(new_df2$acc),"threshold"] # train 0.56
+# ···························································································
+# Gráfico de cómo varía la métrica de performance accuracy, de acuerdo al umbral elegido
+ggplot(new_df, aes(x=threshold, y=acc)) + geom_line(aes(color = sub_data,linetype=sub_data)) +
+        theme + labs(x='Umbral', y='Métrica de performance (accuracy)',
+                     title= 'Evaluación del modelo de discriminante regularizado RDA') +
+        scale_color_manual(values = c("red", "darkred"),labels=c('prueba','entrenamiento')) +
+        scale_linetype_manual(values=c(1,2), labels=c('prueba','entrenamiento')) + 
+        labs(color='Conjunto de\n evaluación',linetype='Conjunto de\n evaluación')
+# Para independizarnos de la elección del umbral, grafico curvas ROC para las predicciones del modelo RDA con los datos de TEST y TRAIN
+df_rda = generateThreshVsPerfData(list(rda_te = pred_rda, rda_tr = pred_rda2), 
+                                  measures = list(fpr, tpr, mmce))
+plotROCCurves(df_rda) + theme + 
+        labs(title='Curva ROC del modelo discriminante regularizado RDA', 
+             x='Tasa de falsos positivos (FPR)', y='Tasa de positivos verdaderos (TPR)',
+             color='Conjunto de\n evaluación') +
+        scale_color_manual(values = c("red", "darkred"), labels=c('prueba','entrenamiento')) +
+        geom_label(label="AUC= 0.858", x=0.35, y=0.75, label.size = 0.3, size=4,
+                   color = "red",fill="white") +
+        geom_label(label="AUC= 0.914", x=0.068, y=0.95, label.size = 0.3, size=4,
+                   color = "darkred",fill="white")
+# ················ Métricas del modelo de RDA ················
+Métrica <- c('valor','datos')
+Accuracy <- c(acc_rda1,'prueba')
+Accuracy. <- c(acc_rda2,'entrenamiento')
+AUC_ROC <- c(AUC_rda_te,'prueba')
+AUC_ROC. <- c(AUC_rda_tr,'entrenamiento')
+# Imprimo resultados
+kable(rbind(Métrica, Accuracy, Accuracy., AUC_ROC, AUC_ROC.))
+```
+
+### **REGRESIÓN LOGÍSTICA**
+```{r regresión logística}
+# chequeo el balance de las distintas clases de  la variable diagnóstico en el conjunto de todos los datos, los datos de prueba y los datos de entramiento.
+Entrenamiento <- table(datos_tr$diagnosis) #126 normal, 140 maligno
+Prueba <- table(datos_te$diagnosis) # 57 normal, 58 maligno
+Total <- table(data$diagnosis) # 183 normal, 198 maligno
+kable(rbind(Entrenamiento, Prueba,Total))
+# Armo modelo de regresión logistica. 
+set.seed(1)
+task = makeClassifTask(data = datos_tr[-2], target = "diagnosis") 
+lrn = makeLearner("classif.logreg", predict.type = "prob")
+mod_lr = mlr::train(lrn, task)
+# Predicción en TEST
+pred_lr= predict(mod_lr, newdata = datos_te[-2])
+acc_lg1 <- round(measureACC(as.data.frame(pred_lr)$truth, as.data.frame(pred_lr)$response),3)
+AUC_lg_te <- round(measureAUC(as.data.frame(pred_lr)$prob.maligno,as.data.frame(pred_lr)$truth,'normal','maligno'),3)
+# ···························································································
+# Predicción en TRAIN
+pred_lr2 = predict(mod_lr, newdata = datos_tr[-2]) # por si quiero ver naive sobre training
+acc_lg2 <- round(measureACC(as.data.frame(pred_lr2)$truth, as.data.frame(pred_lr2)$response),3)
+AUC_lg_tr <- round(measureAUC(as.data.frame(pred_lr2)$prob.maligno,as.data.frame(pred_lr2)$truth, 'normal','maligno'),3)
+# ···························································································
+# Cambio el threshold [esto lo hago para train y test]
+acc=NULL
+acc2=NULL
+threshold = seq(0.1,0.95,0.01)
+for (i in 1:length(threshold)) {
+        pred = setThreshold(pred_lr, threshold = threshold[i])
+        acc[i] = measureACC(as.data.frame(pred)$truth, as.data.frame(pred)$response)}
+for (i in 1:length(threshold)) {
+        pred2 = setThreshold(pred_lr2, threshold = threshold[i])
+        acc2[i] = measureACC(as.data.frame(pred2)$truth, as.data.frame(pred2)$response)}
+par(mfcol = c(1,2))
+
+new_df1 <- as.data.frame(cbind(threshold,acc))
+new_df1 <- new_df1%>%mutate(sub_data='test')
+new_df2 <- as.data.frame(cbind(threshold,acc2))
+colnames(new_df2) <- c('threshold','acc')
+new_df2 <- new_df2%>%mutate(sub_data='train')
+
+new_df <- as.data.frame(rbind(new_df1,new_df2))
+
+#new_df1[which.max(new_df1$acc),"threshold"] # test 0.33
+#new_df2[which.max(new_df2$acc),"threshold"] # train 0.53
+
+# Para independizarnos de la elección del umbral, grafico curvas ROC para las predicciones del modelo LR con los datos de TEST y TRAIN
+df_lr = generateThreshVsPerfData(list(lgr_te = pred_lr, lgr_tr = pred_lr2),
+                                 measures = list(fpr, tpr, mmce))
+
+plotROCCurves(df_lr) + theme +
+        labs(title='Curva ROC del modelo regresión logística', x='Tasa de falsos positivos (FPR)',
+             y='Tasa de positivos verdaderos (TPR)', color='Conjunto de\n evaluación') +
+        scale_color_manual(values = c("red", "darkred"), labels=c('prueba','entrenamiento')) +
+        geom_label(label="AUC= 0.889", x=0.35, y=0.75, label.size = 0.3, size=4,
+                   color = "red",fill="white") +
+        geom_label(label="AUC= 0.925", x=0.07, y=0.97, label.size = 0.3, size=4,
+                   color = "darkred",fill="white")
+# ················ Métricas del modelo de Regresión Logística  ················
+Métrica <- c('valor','datos')
+Accuracy <- c(acc_lg1,'prueba')
+Accuracy. <- c(acc_lg2,'entrenamiento')
+AUC_ROC <- c(AUC_lg_te,'prueba')
+AUC_ROC. <- c(AUC_lg_tr,'entrenamiento')
+# Imprimo los resultados de performance
+kable(rbind(Métrica, Accuracy, Accuracy., AUC_ROC, AUC_ROC.))
+```
+
+```{r coeficientes logreg}
+# Impresión de los coeficientes de regresión logística
+kable(mod_lr$learner.model$coefficients)
+```
+
+```{r recall de log reg}
+# ···························································································
+# Cambio el threshold [esto lo hago para train y test]
+recall=NULL
+precision=NULL
+threshold = seq(0.1,0.95,0.01)
+for (i in 1:length(threshold)) {
+        pred = setThreshold(pred_lr2, threshold = threshold[i])
+        recall[i] = measureTPR(as.data.frame(pred)$truth, as.data.frame(pred)$response,'maligno')}  #recall
+for (i in 1:length(threshold)) {
+        pred2 = setThreshold(pred_lr2, threshold = threshold[i])
+        precision[i] = measurePPV(as.data.frame(pred2)$truth, as.data.frame(pred2)$response,'maligno',probabilities = NULL)}#precision
+par(mfcol = c(1,2))
+
+new_df1 <- as.data.frame(cbind(threshold,recall))
+colnames(new_df1) <- c('threshold','metric')
+new_df1 <- new_df1%>%mutate(sub_data='recall')
+new_df2 <- as.data.frame(cbind(threshold,precision))
+colnames(new_df2) <- c('threshold','metric')
+new_df2 <- new_df2%>%mutate(sub_data='precision')
+
+new_dfa <- as.data.frame(rbind(new_df1,new_df2))
+# ···························································································
+curve1 <- new_df1%>%dplyr::select(1,2)
+curve2 <- new_df2%>%dplyr::select(1,2)
+colnames(curve1) <- c('x','y')
+colnames(curve2) <- c('x','y')
+# threshold en el que se intersectan las curvas de recall y precision (sensibilidad y especificidad, respectivamente)
+thr=curve_intersect(curve1, curve2 , empirical = TRUE, domain = NULL)$x
+
+# Gráfico de cómo varía la métrica de performance recall y precision, de acuerdo al umbral elegido
+ggplot(new_dfa, aes(x=threshold, y=metric)) + geom_line(aes(color = sub_data,linetype=sub_data)) +
+        theme + labs(x='Umbral', y='Métrica de performance',
+                     title= 'Evaluación del modelo de regresión logística en subconjunto de prueba') +
+        scale_color_manual(values = c("red", "LightSeaGreen"),labels=c('recall (TPR)','precision (PPV)')) +
+        scale_linetype_manual(values=c(1,2), labels=c('recall (TPR)','precision (PPV)')) + 
+        labs(color='Métrica',linetype='Métrica')+
+        geom_vline(xintercept = thr, linetype=3, color='darkgray')
+# ···························································································
+# Gráfico de cómo varía la métrica de performance accuracy, de acuerdo al umbral elegido
+ggplot(new_df, aes(x=threshold, y=acc)) + geom_line(aes(color = sub_data,linetype=sub_data)) +
+        theme + labs(x='Umbral', y='Métrica de performance (accuracy)',
+                     title= 'Evaluación del modelo de regresión logística') +
+        scale_color_manual(values = c("red", "darkred"),labels=c('prueba','entrenamiento')) +
+        scale_linetype_manual(values=c(1,2), labels=c('prueba','entrenamiento')) + 
+        labs(color='Conjunto de\n evaluación',linetype='Conjunto de\n evaluación')+
+        geom_vline(xintercept = thr, linetype=3, color='darkgray') 
+```
+
+```{r setthreshold} 
+#seteo el threshold (x) en donde la curva de recall y la de precision se cruzan
+# calculo AUC, accuracy, recall y precision con ese threshold.
+
+prediccion_threshold <- setThreshold(pred_lr, thr)
+
+AUC_lg_tethreshold <- round(measureAUC(as.data.frame(prediccion_threshold)$prob.maligno,as.data.frame(prediccion_threshold)$truth,'normal','maligno'),3) #0.889 ....> y sí! no depende del threshold
+
+accuracy_con_threshold <- round(measureACC(as.data.frame(prediccion_threshold)$truth, as.data.frame(prediccion_threshold)$response),3)
+
+recall_con_threshold <- round(measureTPR(as.data.frame(prediccion_threshold)$truth, as.data.frame(prediccion_threshold)$response, 'maligno'),3)
+
+precision_con_threshold <- round(measurePPV(as.data.frame(prediccion_threshold)$truth, as.data.frame(prediccion_threshold)$response, 'maligno'),3)
+```
+
+### **MÁQUINAS DE SOPORTE VECTORIAL (SVM) con kernel lineal**
+```{r SVM}
+# Defino modelo SVM
+set.seed(1)
+task = makeClassifTask(data = datos_tr[-2], target = "diagnosis") 
+lrn_svm = makeLearner("classif.svm", predict.type = "prob", par.vals = list( kernel = "linear", cost=2)) 
+mod_svm = mlr::train(lrn_svm, task)
+# Predicción TEST
+pred_svm= predict(mod_svm, newdata = datos_te[-2])
+acc_svm1 <- round(measureACC(as.data.frame(pred)$truth, as.data.frame(pred)$response),3)
+AUC_svm_te <- round(measureAUC(as.data.frame(pred_svm)$prob.maligno,as.data.frame(pred_svm)$truth,'normal','maligno'),3)
+# ···························································································
+# Predicción TRAIN (naive)
+pred_svm2 = predict(mod_lr, newdata = datos_tr[-2]) # por si quiero ver naive sobre training
+acc_svm2 <- round(measureACC(as.data.frame(pred_svm2)$truth, as.data.frame(pred_svm2)$response),3)
+AUC_svm_tr <- round(measureAUC(as.data.frame(pred_svm2)$prob.maligno,as.data.frame(pred_svm2)$truth, 'normal','maligno'),3)
+# ···························································································
+# Cambio el threshold [esto lo hago para train y test]
+acc=NULL
+acc2=NULL
+threshold = seq(0.1,0.95,0.01)
+for (i in 1:length(threshold)) {
+        pred = setThreshold(pred_svm, threshold = threshold[i])
+        acc[i] = measureACC(as.data.frame(pred)$truth, as.data.frame(pred)$response)}
+for (i in 1:length(threshold)) {
+        pred2 = setThreshold(pred_svm2, threshold = threshold[i])
+        acc2[i] = measureACC(as.data.frame(pred2)$truth, as.data.frame(pred2)$response)}
+par(mfcol = c(1,2))
+
+new_df1 <- as.data.frame(cbind(threshold,acc))
+new_df1 <- new_df1%>%mutate(sub_data='test')
+new_df2 <- as.data.frame(cbind(threshold,acc2))
+colnames(new_df2) <- c('threshold','acc')
+new_df2 <- new_df2%>%mutate(sub_data='train')
+
+new_df <- as.data.frame(rbind(new_df1,new_df2))
+
+#new_df1[which.max(new_df1$acc),"threshold"] # test 0.39
+#new_df2[which.max(new_df2$acc),"threshold"] # train 0.53
+# ···························································································
+# Gráfico de cómo varía la métrica de performance accuracy, de acuerdo al umbral elegido
+ggplot(new_df, aes(x=threshold, y=acc)) + geom_line(aes(color = sub_data,linetype=sub_data)) +
+        theme +labs(x='Umbral', y='Métrica de performance (accuracy)', 
+                     title= 'Evaluación del modelo de Máquinas de soporte vectorial SVM') +
+        scale_color_manual(values = c("red", "darkred"),labels=c('prueba','entrenamiento')) +
+        scale_linetype_manual(values=c(1,2), labels=c('prueba','entrenamiento')) + 
+        labs(color='Conjunto de\n evaluación',linetype='Conjunto de\n evaluación')
+# Para independizarnos de la elección del umbral, grafico curvas ROC para las predicciones del modelo SVM con los datos de TEST y TRAIN
+df_svm = generateThreshVsPerfData(list(svm_te = pred_svm, svm_tr = pred_svm2), 
+                                  measures = list(fpr, tpr, mmce))
+
+plotROCCurves(df_svm) + theme +
+        labs(title='Curva ROC del modelo de Máquinas de soporte vectorial SVM kernel lineal', 
+             x='Tasa de falsos positivos (FPR)', y='Tasa de positivos verdaderos (TPR)',
+             color='Conjunto de\n evaluación') +
+        scale_color_manual(values = c("red", "darkred"), labels=c('prueba','entrenamiento')) +
+        geom_label(label="AUC= 0.894", x=0.35, y=0.75, label.size = 0.3, size=4,
+                   color = "red",fill="white") + 
+        geom_label(label="AUC= 0.925", x=0.07, y=0.97, label.size = 0.3, size=4,
+                   color = "darkred",fill="white")
+
+# ················ Métricas del modelo de SVM ················
+Métrica <- c('valor','datos')
+Accuracy <- c(acc_svm1,'prueba')
+Accuracy. <- c(acc_svm2,'entrenamiento')
+AUC_ROC <- c(AUC_svm_te,'prueba')
+AUC_ROC. <- c(AUC_svm_tr,'entrenamiento')
+# Imprimo resultados
+kable(rbind(Métrica, Accuracy, Accuracy., AUC_ROC, AUC_ROC.))
+```
+
+### **MÁQUINAS DE SOPORTE VECTORIAL (SVM) con kernel sigmoideo**
+```{r SVM3}
+# Defino modelo SVM
+set.seed(1)
+task = makeClassifTask(data = datos_tr[-2], target = "diagnosis") 
+lrn_svm = makeLearner("classif.svm", predict.type = "prob", par.vals = list( kernel = "sigmoid", cost=2)) 
+mod_svm = mlr::train(lrn_svm, task)
+# Predicción TEST
+pred_svm= predict(mod_svm, newdata = datos_te[-2])
+acc_svm1 <- round(measureACC(as.data.frame(pred)$truth, as.data.frame(pred)$response),3)
+AUC_svm_te <- round(measureAUC(as.data.frame(pred_svm)$prob.maligno,as.data.frame(pred_svm)$truth,'normal','maligno'),3)
+# ···························································································
+# Predicción TRAIN (naive)
+pred_svm2 = predict(mod_lr, newdata = datos_tr[-2]) 
+acc_svm2 <- round(measureACC(as.data.frame(pred_svm2)$truth, as.data.frame(pred_svm2)$response),3)
+AUC_svm_tr <- round(measureAUC(as.data.frame(pred_svm2)$prob.maligno,as.data.frame(pred_svm2)$truth, 'normal','maligno'),3)
+# ···························································································
+# Cambio el threshold [esto lo hago para train y test]
+acc=NULL
+acc2=NULL
+threshold = seq(0.1,0.95,0.01)
+for (i in 1:length(threshold)) {
+        pred = setThreshold(pred_svm, threshold = threshold[i])
+        acc[i] = measureACC(as.data.frame(pred)$truth, as.data.frame(pred)$response)}
+for (i in 1:length(threshold)) {
+        pred2 = setThreshold(pred_svm2, threshold = threshold[i])
+        acc2[i] = measureACC(as.data.frame(pred2)$truth, as.data.frame(pred2)$response)}
+par(mfcol = c(1,2))
+
+new_df1 <- as.data.frame(cbind(threshold,acc))
+new_df1 <- new_df1%>%mutate(sub_data='test')
+new_df2 <- as.data.frame(cbind(threshold,acc2))
+colnames(new_df2) <- c('threshold','acc')
+new_df2 <- new_df2%>%mutate(sub_data='train')
+
+new_df <- as.data.frame(rbind(new_df1,new_df2))
+
+#new_df1[which.max(new_df1$acc),"threshold"] # test 0.39
+#new_df2[which.max(new_df2$acc),"threshold"] # train 0.53
+# ···························································································
+# Gráfico de cómo varía la métrica de performance accuracy, de acuerdo al umbral elegido
+ggplot(new_df, aes(x=threshold, y=acc)) + geom_line(aes(color = sub_data,linetype=sub_data)) +
+        theme +labs(x='Umbral', y='Métrica de performance (accuracy)', 
+                     title= 'Evaluación del modelo de Máquinas de soporte vectorial SVM') +
+        scale_color_manual(values = c("red", "darkred"),labels=c('prueba','entrenamiento')) +
+        scale_linetype_manual(values=c(1,2), labels=c('prueba','entrenamiento')) + 
+        labs(color='Conjunto de\n evaluación',linetype='Conjunto de\n evaluación')
+# Para independizarnos de la elección del umbral, grafico curvas ROC para las predicciones del modelo SVM con los datos de TEST y TRAIN
+df_svm = generateThreshVsPerfData(list(svm_te = pred_svm, svm_tr = pred_svm2), 
+                                  measures = list(fpr, tpr, mmce))
+
+plotROCCurves(df_svm) + theme +
+        labs(title='Curva ROC del modelo de Máquinas de soporte vectorial SVM kernel radial', 
+             x='Tasa de falsos positivos (FPR)', y='Tasa de positivos verdaderos (TPR)',
+             color='Conjunto de\n evaluación') +
+        scale_color_manual(values = c("red", "darkred"), labels=c('prueba','entrenamiento')) +
+        geom_label(label="AUC= 0.855", x=0.35, y=0.75, label.size = 0.3, size=4,
+                   color = "red",fill="white") + 
+        geom_label(label="AUC= 0.925", x=0.07, y=0.97, label.size = 0.3, size=4,
+                   color = "darkred",fill="white")
+# ················ Métricas del modelo de SVM ················
+Métrica <- c('valor','datos')
+Accuracy <- c(acc_svm1,'prueba')
+Accuracy. <- c(acc_svm2,'entrenamiento')
+AUC_ROC <- c(AUC_svm_te,'prueba')
+AUC_ROC. <- c(AUC_svm_tr,'entrenamiento')
+# Imprimo resultados de métricas de performance
+kable(rbind(Métrica, Accuracy, Accuracy., AUC_ROC, AUC_ROC.))
+```
+
+### **MÁQUINAS DE SOPORTE VECTORIAL (SVM) con kernel radial**
+```{r SVM2}
+# Defino modelo SVM
+set.seed(1)
+task = makeClassifTask(data = datos_tr[-2], target = "diagnosis") 
+lrn_svm = makeLearner("classif.svm", predict.type = "prob", par.vals = list( kernel = "radial", cost=2)) 
+mod_svm = mlr::train(lrn_svm, task)
+# Predicción TEST
+pred_svm= predict(mod_svm, newdata = datos_te[-2])
+acc_svm1 <- round(measureACC(as.data.frame(pred)$truth, as.data.frame(pred)$response),3)
+AUC_svm_te <- round(measureAUC(as.data.frame(pred_svm)$prob.maligno,as.data.frame(pred_svm)$truth,'normal','maligno'),3)
+# ···························································································
+# Predicción TRAIN (naive)
+pred_svm2 = predict(mod_lr, newdata = datos_tr[-2]) # por si quiero ver naive sobre training
+acc_svm2 <- round(measureACC(as.data.frame(pred_svm2)$truth, as.data.frame(pred_svm2)$response),3)
+AUC_svm_tr <- round(measureAUC(as.data.frame(pred_svm2)$prob.maligno,as.data.frame(pred_svm2)$truth, 'normal','maligno'),3)
+# ···························································································
+# Cambio el threshold [esto lo hago para train y test]
+acc=NULL
+acc2=NULL
+threshold = seq(0.1,0.95,0.01)
+for (i in 1:length(threshold)) {
+        pred = setThreshold(pred_svm, threshold = threshold[i])
+        acc[i] = measureACC(as.data.frame(pred)$truth, as.data.frame(pred)$response)}
+for (i in 1:length(threshold)) {
+        pred2 = setThreshold(pred_svm2, threshold = threshold[i])
+        acc2[i] = measureACC(as.data.frame(pred2)$truth, as.data.frame(pred2)$response)}
+par(mfcol = c(1,2))
+
+new_df1 <- as.data.frame(cbind(threshold,acc))
+new_df1 <- new_df1%>%mutate(sub_data='test')
+new_df2 <- as.data.frame(cbind(threshold,acc2))
+colnames(new_df2) <- c('threshold','acc')
+new_df2 <- new_df2%>%mutate(sub_data='train')
+
+new_df <- as.data.frame(rbind(new_df1,new_df2))
+
+#new_df1[which.max(new_df1$acc),"threshold"] # test 0.39
+#new_df2[which.max(new_df2$acc),"threshold"] # train 0.53
+# ···························································································
+# Gráfico de cómo varía la métrica de performance accuracy, de acuerdo al umbral elegido
+ggplot(new_df, aes(x=threshold, y=acc)) + geom_line(aes(color = sub_data,linetype=sub_data)) +
+        theme +labs(x='Umbral', y='Métrica de performance (accuracy)', 
+                     title= 'Evaluación del modelo de Máquinas de soporte vectorial SVM') +
+        scale_color_manual(values = c("red", "darkred"),labels=c('prueba','entrenamiento')) +
+        scale_linetype_manual(values=c(1,2), labels=c('prueba','entrenamiento')) + 
+        labs(color='Conjunto de\n evaluación',linetype='Conjunto de\n evaluación')
+# Para independizarnos de la elección del umbral, grafico curvas ROC para las predicciones del modelo SVM con los datos de TEST y TRAIN
+df_svm = generateThreshVsPerfData(list(svm_te = pred_svm, svm_tr = pred_svm2), 
+                                  measures = list(fpr, tpr, mmce))
+
+plotROCCurves(df_svm) + theme +
+        labs(title='Curva ROC del modelo de Máquinas de soporte vectorial SVM kernel radial', 
+             x='Tasa de falsos positivos (FPR)', y='Tasa de positivos verdaderos (TPR)',
+             color='Conjunto de\n evaluación') +
+        scale_color_manual(values = c("red", "darkred"), labels=c('prueba','entrenamiento')) +
+        geom_label(label="AUC= 0.915", x=0.35, y=0.75, label.size = 0.3, size=4,
+                   color = "red",fill="white") + 
+        geom_label(label="AUC= 0.925", x=0.07, y=0.97, label.size = 0.3, size=4,
+                   color = "darkred",fill="white")
+# ················ Métricas del modelo de SVM ················
+Métrica <- c('valor','datos')
+Accuracy <- c(acc_svm1,'prueba')
+Accuracy. <- c(acc_svm2,'entrenamiento')
+AUC_ROC <- c(AUC_svm_te,'prueba')
+AUC_ROC. <- c(AUC_svm_tr,'entrenamiento')
+# Imprimo resultados de métricas de performance
+kable(rbind(Métrica, Accuracy, Accuracy., AUC_ROC, AUC_ROC.))
+```
+
+### **COMPARACIÓN DE MÉTODOS DE CLASIFICACIÓN SUPERVISADA**
+```{r METRICAS de LDA, QDA, RDA}
+# todos los test
+LDA_metrics <- calculateROCMeasures(pred_lda)
+QDA_metrics <- calculateROCMeasures(pred_qda)
+RDA_metrics <- calculateROCMeasures(pred_rda)
+logreg_metrics <- calculateROCMeasures(pred_lr)
+SVM_metrics <- calculateROCMeasures(pred_svm)
+
+# Ingenua para ver cómo le va 
+pred_todos=NULL
+pred_todos_lda <- as.data.frame(predict(mod1, newdata = datos_escalados[-2]))
+pred_todos_qda <- as.data.frame(predict(mod2, newdata = datos_escalados[-2]))
+pred_todos_rda <- as.data.frame(predict(mod3, newdata = datos_escalados[-2]))
+pred_todos_lg <- as.data.frame(predict(mod_lr, newdata = datos_escalados[-2]))
+pred_todos_svm <- as.data.frame(predict(mod_svm, newdata = datos_escalados[-2]))
+
+# ······················ PCA datos originales ··················································
+ggbiplot(datos.pc, obs.scale=0.1 ,var.scale=1,alpha=0.5,groups=factor(data$diagnosis)) +
+        scale_color_manual(name="Diagnóstico", values=c('royalblue2','#ff7474ff'),
+                           labels=c("normal","maligno")) +
+        theme + labs(x='PC1 (51.5% explicado)', y= 'PC2 (22.5% explicado)',
+        title= 'Representación de las etiquetas reales\nen las componentes principales 1 y 2')+
+        theme(legend.position=c(.865,.15))
+# ······················ PCA + predicciones LDA ··················································
+ggbiplot(datos.pc, obs.scale=0.1 ,var.scale=1,alpha=.5,groups=factor(pred_todos_lda$response)) +
+        scale_color_manual(name="Predicción", values=c('royalblue2','#ff7474ff'),
+                           labels=c("normal","maligno")) + 
+        theme + labs(x='PC1 (51.5% explicado)', y= 'PC2 (22.5% explicado)',
+        title= 'Representación de las predicciones ingenuas del modelo LDA\nen las componentes principales 1 y 2') +
+        theme(legend.position=c(.865,.15))
+ # ······················ PCA + predicciones QDA ··················································
+ggbiplot(datos.pc, obs.scale=0.1 ,var.scale=1,alpha=.5,groups=factor(pred_todos_qda$response)) +
+        scale_color_manual(name="Predicción", values=c('royalblue2','#ff7474ff'),
+                           labels=c("normal","maligno")) + 
+        theme + labs(x='PC1 (51.5% explicado)', y= 'PC2 (22.5% explicado)',
+        title= 'Representación de las predicciones ingenuas del modelo QDA\nen las componentes principales 1 y 2') +
+        theme(legend.position=c(.865,.15))
+# ······················ PCA + predicciones RDA ··················································
+ggbiplot(datos.pc, obs.scale=0.1 ,var.scale=1,alpha=.5,groups=factor(pred_todos_rda$response)) +
+        scale_color_manual(name="Predicción", values=c('royalblue2','#ff7474ff'),
+                           labels=c("normal","maligno")) +
+        theme + labs(x='PC1 (51.5% explicado)', y= 'PC2 (22.5% explicado)',
+        title= 'Representación de las predicciones ingenuas del modelo RDA\nen las componentes principales 1 y 2') +
+        theme(legend.position=c(.865,.15))
+# ······················ PCA + predicciones LG ··················································
+ggbiplot(datos.pc, obs.scale=0.1 ,var.scale=1,alpha=.5,groups=factor(pred_todos_lg$response)) +
+        scale_color_manual(name="Predicción", values=c('royalblue2','#ff7474ff'),
+                           labels=c("normal","maligno")) +
+        theme + labs(x='PC1 (51.5% explicado)', y= 'PC2 (22.5% explicado)',
+        title= 'Representación de las predicciones ingenuas del modelo LG\nen las componentes principales 1 y 2') +
+        theme(legend.position=c(.865,.15))
+# ······················ PCA + predicciones SVM ·················································
+ggbiplot(datos.pc, obs.scale=0.1 ,var.scale=1,alpha=.5,groups=factor(pred_todos_svm$response)) +
+        scale_color_manual(name="Predicción", values=c('royalblue2','#ff7474ff'),
+                           labels=c("normal","maligno")) +
+        theme + labs(x='PC1 (51.5% explicado)', y= 'PC2 (22.5% explicado)',                                   title= 'Representación de las predicciones ingenuas del modelo SVM (r)\nen las componentes principales 1 y 2') +
+        theme(legend.position=c(.865,.15))
+
+#Coeficientes del modelo de regresión lineal
+mod1$learner.model
+```
+
+```{r todos ROC}
+# ······················ curvas ROC para todos los modelos ········································
+df_todos = generateThreshVsPerfData(list(lda=pred_lda, qda=pred_qda, rda=pred_rda, lg=pred_lr, 
+                                         svm = pred_svm), measures = list(fpr, tpr, mmce))
+
+plotROCCurves(df_todos) + theme + 
+        labs(title='Curvas ROC de modelos de clasificación supervisada (datos de prueba)',
+             x='Tasa de falsos positivos (FPR)', y='Tasa de positivos verdaderos (TPR)', 
+             color=' Modelo en\n evaluación') +
+        scale_color_manual(values = c("red", "black", "blue", "darkgreen","violet"),
+                           labels=c('LDA','Reg log','QDA','RDA','SVM (r)'))+
+        theme(legend.position=c(0.915,0.25))
+# ············ valores AUC para todos los modelos cuando se consideran todas las variables ···················
+AUC_values <- rbind(AUC_lda_te, AUC_qda_te, AUC_rda_te, AUC_lg_te, AUC_svm_te)
+AUC_values <- as.data.frame(AUC_values)
+AUC_values$Modelo <- c('LDA','QDA','RDA','Reg Log','SVM')
+colnames(AUC_values) <- c('Area debajo de la curva (AUC)','Modelo')
+row.names(AUC_values) <- NULL
+AUC_values <- AUC_values%>%dplyr::select(2,1)
+# Imprimo resultados
+kable(AUC_values)
+```
+
+### **EVALUACIÓN DE MODELOS DE CLASIFICACIÓN SUPERVISADA UTILIZANDO DISTINTAS COMBINACIONES DE VARIABLES NUMÉRICAS, MEDIANTE MÉTRICA DE AUC (ROC)**
+```{r todos todos, echo=F}
+creatinina <- c('+','+','+','-','-')
+edad <- c('+','+','+','+','+')
+LYVE1 <- c('+','+','+','+','+')
+REG1B <- c('+','+','-','+','+')
+TFF1 <- c('+','-','-','-','+')
+variable <- rbind(creatinina, edad, LYVE1,REG1B, TFF1)
+variable <- as.data.frame(variable)
+variable$VARIABLE <- c('creatinina', 'edad', 'LYVE1','REG1B', 'TFF1')
+colnames(variable) <- c('---1---','---2---','---3---','---4---','---5---','VARIABLE')
+variable <- variable%>%dplyr::select(6,1:5)
+row.names(variable) <- NULL
+kable(variable)
+
+```
+```{r todos todos2, echo=F}
+LDA <- c('0.860','0.857','0.851','0.853','0.855')
+QDA <- c('0.929','0.911','0.877','0.886','0.911')
+RDA <- c('0.858','0.858','0.872','0.854','0.858')
+LogR <- c('0.889','0.870','0.853','0.865','0.872')
+SVM_kernel.L <- c('0.894','0.872','0.854','0.870','0.891')
+SVM_kernel.R <- c('0.915','0.900','0.887','0.866','0.877')
+SVM_kernel.S <- c('0.855','0.822','0.773','0.809','0.841')
+modelillo <- rbind(LDA,QDA,RDA,LogR,SVM_kernel.L,SVM_kernel.R,SVM_kernel.S)
+modelillo <- as.data.frame(modelillo)
+modelillo$MODELO <- c('LDA', 'QDA', 'RDA','LogR', 'SVM_L', 'SVM_R','SVM_S')
+colnames(modelillo) <- c('---1---','---2---','---3---','---4---','---5---','MODELO')
+modelillo <- modelillo%>%dplyr::select(6,1:5)
+row.names(modelillo) <- NULL
+kable(modelillo)
+```
+
+
+
+# MÉTODOS DE CLASIFICACIÓN NO SUPERVISADA / CLUSTERING
+
+### **ELECCIÓN DEL NÚMERO DE CLUSTERS**
+```{r CLUSTERING euclidea estandarizada}
+datos_para_cluster = data[3:7]
+#analisis de la cantidad de clusters. Este primer bloque es solo para definir funciones.
+#se define una funcion para calcular metricas que orientan sobre el numero de clusters a elegir para el problema.
+metrica = function(datA_esc,kmax,f) {
+        sil = array()
+        sse = array()
+        datA_dist= dist(datA_esc,method = "euclidean", diag = FALSE, upper = FALSE, p = 2)
+        for ( i in  2:kmax) { if (strcmp(f,"kmeans")==TRUE) {   #centroide: tipico kmeans
+                        CL  = kmeans(datA_esc,centers=i,nstart=50,iter.max = kmax)
+                        sse[i]  = CL$tot.withinss 
+                        CL_sil = silhouette(CL$cluster, datA_dist)
+                        sil[i]  = summary(CL_sil)$avg.width}
+                if (strcmp(f,"pam")==TRUE){       #medoide: ojo porque este metodo tarda muchisimo 
+                        CL = pam(x=datA_esc, k=i, diss = F, metric = "euclidean")
+                        sse[i]  = CL$objective[1] 
+                        sil[i]  = CL$silinfo$avg.width}}
+        sse
+        sil
+        return(data.frame(sse,sil))}
+#en este bloque se estudia cuantos clusters convendría generar segun indicadores tipicos -> por ejemplo el "Silhouette"
+kmax = 10
+
+m1   = metrica(scale(datos_para_cluster),kmax,"kmeans")  #tipica con estimadores de la normal
+m1 <- m1[complete.cases(m1),]
+m1$kcluster <- seq(2,kmax,1)
+m1 <- m1%>%dplyr::select(3,1,2)
+m1_sse <- m1%>%dplyr::select(-3)%>%mutate(metric='SSE')
+colnames(m1_sse) <- c('kcluster','value','metric')
+m1_sil <- m1%>%dplyr::select(-2)%>%mutate(metric='SIL')
+colnames(m1_sil) <- c('kcluster','value','metric')
+m1 <- rbind(m1_sse,m1_sil)
+# Grafico de métricas SIL y SSE
+ggplot(m1, aes(kcluster, value, linetype=metric)) + geom_line(col='red') + 
+        facet_wrap(~metric, ncol=1, scales='free')+theme+geom_point(col='red', size=2, fill='pink', shape=21)+
+        labs(title='Determinación de número de clusters', 
+             x='k Número de clusters', y='Valor', linetype='Métrica')+
+        scale_x_continuous(breaks = seq(1, kmax, by = 1))+
+        scale_linetype_manual(values=c(1,2))
+```
+
+### **k-MEANS con k=2**
+```{r kmeans 2} 
+set.seed(1)
+cantidad_clusters=2
+
+CL  = kmeans(scale(datos_para_cluster),cantidad_clusters)
+data$kmeans = CL$cluster
+
+# Grafico scatterplot original + cluster con k=2
+par(mfrow=c(1,2))
+# -------------------------------------------------------------------------------------------
+col1 <- c('royalblue2','#ff7474ff')
+col1 <- col1[as.numeric(data$diagnosis)]
+
+scatterplot3d(data$edad,data$REG1B,data$LYVE1, color = alpha(col1,0.3), box=F,angle=45, pch = 19, grid = TRUE, tick.marks = FALSE, xlab = "edad", ylab = "REG1B", zlab = "LYVE1", main='Realidad')
+legend("topright", bty = "n", cex = .9, title = "Diagnóstico", c("normal", "maligno"), fill = c('royalblue2','#ff7474ff'))
+# -------------------------------------------------------------------------------------------
+colors <- c('orange','#a25da2a5')
+colors <- colors[as.numeric(data$kmeans)]
+
+scatterplot3d(data$edad,data$REG1B,data$LYVE1, color = alpha(colors,0.3), box=F,angle=45, pch = 19, grid = TRUE, tick.marks = FALSE, xlab = "edad", ylab = "REG1B", zlab = "LYVE1", main='Clustering')
+legend("topright", bty = "n", cex = .9, title = "Grupo k-means", c("1", "2"), fill = c('orange','#a25da2a5'))
+
+#conviene en un biplot ya que tengo las flechas de las variables originales
+# GRAFICO ORIGINAL
+ggbiplot(datos.pc, obs.scale=0.1 ,var.scale=1,alpha=0.5,
+         groups=factor(data$diagnosis)) +
+        scale_color_manual(name="diagnosis",values=c('royalblue2','#ff7474ff'),
+                           labels=c("normal",'maligno')) +
+        theme + labs(title='Análisis de componentes principales') + 
+        theme(legend.position=c(.85,.15)) + 
+        labs(x='PC1 (51.5% explicado)', y= 'PC2 (22.5% explicado)')
+# -------------------------------------------------------------------------------------------
+# GRAFICO KMEANS
+ggbiplot(datos.pc, obs.scale=0.1 ,var.scale=1, alpha=0.5,groups = as.factor(data$kmeans) )+
+        scale_color_manual(name="Grupo k-means", values=c("orange",'#a25da2a5',"darkgreen"),
+                           labels=c("1", "2","3")) + theme+
+        labs(x='PC1 (51.5% explicado)', y= 'PC2 (22.5% explicado)',
+             title= 'Representación del clustering utilizando k-means')+theme(legend.position=c(.85,.15)) 
+
+# ·····················································
+# cuántos pacientes de cada diagnóstico están en cada cluster:
+pacientes_cluster1 <- data %>% filter (kmeans == '1')
+cluster1 <- table(pacientes_cluster1$diagnosis)
+porcentaje_cluster.1 <- round(prop.table(cluster1)*100,2)
+pacientes_cluster2 <- data %>% filter (kmeans == '2')
+cluster2 <- table(pacientes_cluster2$diagnosis)
+porcentaje_cluster.2 <- round(prop.table(cluster2)*100,2)
+# ·····················································
+# Imprimo resultados
+kable(cbind(rbind(cluster1,cluster2),rbind(porcentaje_cluster.1,porcentaje_cluster.2)))
+```
+
+#### **k-MEANS con k=2. Calculo medias de los datos originales en cada variable, y en cada diagnóstico y lo comparo con las medias de cada variable en cada uno de los clusters definidos**
+```{r kmeans 2 calculos} 
+kmeans1 <- data %>% filter(kmeans==1)  %>%dplyr::select(c(3:7))%>% colMeans()
+kmeans2 <- data %>% filter(kmeans==2)  %>%dplyr::select(c(3:7))%>% colMeans()
+normal <- data %>%filter(diagnosis=='normal') %>%dplyr::select(c(3:7))%>% colMeans()
+maligno <- data %>%filter(diagnosis=='maligno') %>%dplyr::select(c(3:7))%>% colMeans()
+# Imprimo resultados
+kable(rbind(kmeans1,normal,kmeans2,maligno))
+```
+
+### **k-MEANS con k=2 sin escalar**
+```{r kmeans 2 sin escalar} 
+cantidad_clusters=2
+set.seed(1)
+CL  = kmeans(datos_para_cluster,cantidad_clusters)
+data$kmeans = CL$cluster
+
+par(mfrow=c(1,2))
+# -------------------------------------------------------------------------------------------
+# GRAFICO ORIGINAL
+col1 <- c('royalblue2','#ff7474ff')
+col1 <- col1[as.numeric(data$diagnosis)]
+
+scatterplot3d(data$edad,data$REG1B,data$LYVE1, color = alpha(col1,0.3), box=F,angle=45, pch = 19, grid = TRUE, tick.marks = FALSE, xlab = "edad", ylab = "REG1B", zlab = "LYVE1", main='Realidad')
+legend("topright", bty = "n", cex = .9, title = "Diagnóstico", c("normal", "maligno"), fill = c('royalblue2','#ff7474ff'))
+# -------------------------------------------------------------------------------------------
+# GRAFICO CLUSTERS
+colors <- c('orange','#a25da2a5')
+colors <- colors[as.numeric(data$kmeans)]
+
+scatterplot3d(data$edad,data$REG1B,data$LYVE1, color = alpha(colors,0.3), box=F,angle=45, pch = 19, grid = TRUE, tick.marks = FALSE, xlab = "edad", ylab = "REG1B", zlab = "LYVE1", main='Clustering')
+legend("topright", bty = "n", cex = .9, title = "Grupo k-means", c("1", "2"), fill = c('orange','#a25da2a5'))
+# -------------------------------------------------------------------------------------------
+#conviene en un biplot ya que tengo las flechas de las variables originales
+# GRAFICO CLUSTER EN PCA 1 Y 2
+ggbiplot(datos.pc, obs.scale=.1 ,var.scale=1, alpha=0.5,groups = as.factor(data$kmeans) )+
+        scale_color_manual(name="Grupo k-means", values=c("orange",'#a25da2a5',"darkgreen"),
+                           labels=c("1", "2","3")) + theme+
+        labs(x='PC1 (51.5% explicado)', y= 'PC2 (22.5% explicado)',
+             title= 'Representación del clustering utilizando k-means')+theme(legend.position=c(.865,.2)) + 
+        scale_x_continuous(breaks = seq(-2.5, 7.5, by = 2.5))
+# ·····················································
+# cuántos pacientes de cada diagnóstico están en cada cluster:
+pacientes_cluster1 <- data %>% filter (kmeans == '1')
+cluster1 <- table(pacientes_cluster1$diagnosis)
+porcentaje_cluster.1 <- round(prop.table(cluster1)*100,2)
+pacientes_cluster2 <- data %>% filter (kmeans == '2')
+cluster2 <- table(pacientes_cluster2$diagnosis)
+porcentaje_cluster.2 <- round(prop.table(cluster2)*100,2)
+# ·····················································
+# Imprimo resultados
+kable(cbind(rbind(cluster1,cluster2),rbind(porcentaje_cluster.1,porcentaje_cluster.2)))
+```
+
+### **k-MEANS con k=3**
+```{r kmeans 3}
+
+cantidad_clusters=2
+set.seed(1)
+CL  = kmeans(scale(datos_para_cluster),cantidad_clusters)
+data$kmeans = CL$cluster
+par(mar=c(0, .5, 5.5, 0.5),mfrow=c(1,3))
+# -------------------------------------------------------------------------------------------
+# GRAFICO ORIGINAL
+col1 <- c('royalblue2','#ff7474ff')
+col1 <- col1[as.numeric(data$diagnosis)]
+
+scatterplot3d(data$edad,data$REG1B,data$LYVE1, color = alpha(col1,0.3), box=F,angle=25, pch = 19, grid = TRUE, tick.marks = FALSE, xlab = "edad", ylab = "REG1B", zlab = "LYVE1", main='Realidad', cex.lab=.8,scale.y=2, cex.symbols=1.3)
+legend(x=4, y=5.5, bty = "n", cex =1.1, title = "Diagnóstico", c("normal", "maligno"), fill = c('royalblue2','#ff7474ff'))
+# -------------------------------------------------------------------------------------------
+# GRAFICO K=2
+colors <- c('orange','#a25da2a5')
+colors <- colors[as.numeric(data$kmeans)]
+
+scatterplot3d(data$edad,data$REG1B,data$LYVE1, color = alpha(colors,0.3), box=F,angle=25, pch = 19, grid = TRUE, tick.marks = FALSE, xlab = "edad", ylab = "REG1B", zlab = "LYVE1", main='Clustering k=2', cex.lab=.8,scale.y=2, cex.symbols=1.3)
+legend(x=4, y=5.5,  bty = "n", cex = 1.1, title = "Grupo k-means", c("1", "2"), fill = c('orange','#a25da2a5'))
+# -------------------------------------------------------------------------------------------
+# ENTRENO K MEANS CON K=3
+cantidad_clusters=3
+set.seed(1)
+CL  = kmeans(scale(datos_para_cluster),cantidad_clusters)
+data$kmeans = CL$cluster
+colors2 <- c('orange','#a25da2a5', 'darkgreen')
+colors2 <- colors2[as.numeric(data$kmeans)]
+# -------------------------------------------------------------------------------------------
+# GRAFICO K=3
+scatterplot3d(data$edad,data$REG1B,data$LYVE1, color = alpha(colors2,0.3), box=F,angle=25, pch = 19, grid = TRUE, tick.marks = FALSE, xlab = "edad", ylab = "REG1B", zlab = "LYVE1", main='Clustering k=3', cex.lab=.8,scale.y=2, cex.symbols=1.3)
+legend(x=4, y=5.5, bty = "n", cex = 1.1, title = "Grupo k-means", c("1", "2","3"), fill = c('orange','#a25da2a5','darkgreen'))
+# -------------------------------------------------------------------------------------------
+# GRAFICOS K MEANS EN ACP COORD
+ggbiplot(datos.pc, obs.scale=0.1 ,var.scale=1,alpha=0.5,
+         groups=factor(data$diagnosis)) +
+        scale_color_manual(name="diagnosis",values=c('royalblue2','#ff7474ff'),
+                           labels=c("normal",'maligno')) +
+        theme + labs(title='Análisis de componentes principales') + 
+        theme(legend.position=c(.85,.15)) + 
+        labs(x='PC1 (51.5% explicado)', y= 'PC2 (22.5% explicado)')
+
+ggbiplot(datos.pc, obs.scale=0.1 ,var.scale=1, alpha=0.5,groups = as.factor(data$kmeans) )+
+        scale_color_manual(name="Grupo k-means", values=c("orange",'#a25da2a5',"darkgreen"),
+                           labels=c("1", "2","3")) + theme+
+        labs(x='PC1 (51.5% explicado)', y= 'PC2 (22.5% explicado)',
+             title= 'Representación del clustering utilizando k-means')+theme(legend.position=c(.85,.15))
+# ·····················································
+# cuántos pacientes de cada diagnóstico están en cada cluster:
+pacientes_cluster1 <- data %>% filter (kmeans == '1')
+cluster1 <- table(pacientes_cluster1$diagnosis)
+porcentaje_cluster.1 <- round(prop.table(cluster1)*100,2)
+# ·····················································
+pacientes_cluster2 <- data %>% filter (kmeans == '2')
+cluster2 <- table(pacientes_cluster2$diagnosis)
+porcentaje_cluster.2 <- round(prop.table(cluster2)*100,2)
+# ·····················································
+pacientes_cluster3 <- data %>% filter (kmeans == '3')
+cluster3 <- table(pacientes_cluster3$diagnosis)
+porcentaje_cluster.3 <- round(prop.table(cluster3)*100,2)
+# ·····················································
+# Imprimo resultados
+kable(cbind(rbind(cluster1,cluster2,cluster3),rbind(porcentaje_cluster.1,porcentaje_cluster.2,porcentaje_cluster.3)))
+```
+### **k-MEANS con k=3 sin escalar**
+```{r kmeans 3 sin escalar}
+cantidad_clusters=3
+
+CL  = kmeans(datos_para_cluster,cantidad_clusters)
+data$kmeans = CL$cluster
+par(mfrow=c(1,2))
+
+col1 <- c('royalblue2','#ff7474ff')
+col1 <- col1[as.numeric(data$diagnosis)]
+
+scatterplot3d(data$edad,data$REG1B,data$LYVE1,  color =alpha(col1,0.3), box=F,angle=45, pch = 19, grid = TRUE, tick.marks = FALSE, xlab = "edad", ylab = "REG1B", zlab = "LYVE1", main='Realidad')
+legend("topright", bty = "n", cex = .9, title = "Diagnóstico", c("normal", "maligno"), fill = c('royalblue2','#ff7474ff'))
+
+colors <- c('orange','#a25da2a5', 'darkgreen')
+colors <- colors[as.numeric(data$kmeans)]
+
+scatterplot3d(data$edad,data$REG1B,data$LYVE1, color = alpha(colors,0.3), box=F,angle=45, pch = 19, grid = TRUE, tick.marks = FALSE, xlab = "edad", ylab = "REG1B", zlab = "LYVE1", main='Clustering')
+legend("topright", bty = "n", cex = .9, title = "Grupo k-means", c("1", "2","3"), fill = c('orange','#a25da2a5','darkgreen'))
+
+#conviene en un biplot ya que tengo las flechas de las variables originales
+ggbiplot(datos.pc, obs.scale=0.1 ,var.scale=1, alpha=0.5,groups = as.factor(data$kmeans) )+
+        scale_color_manual(name="Grupo k-means", values=c("orange",'#a25da2a5',"darkgreen"),
+                           labels=c("1", "2","3")) + theme+
+        labs(x='PC1 (51.5% explicado)', y= 'PC2 (22.5% explicado)',
+             title= 'Representación del clustering utilizando k-means')+theme(legend.position=c(.865,.2))
+
+# ·····················································
+# cuántos pacientes de cada diagnóstico están en cada cluster:
+pacientes_cluster1 <- data %>% filter (kmeans == '1')
+cluster1 <- table(pacientes_cluster1$diagnosis)
+porcentaje_cluster.1 <- round(prop.table(cluster1)*100,2)
+# ·····················································
+pacientes_cluster2 <- data %>% filter (kmeans == '2')
+cluster2 <- table(pacientes_cluster2$diagnosis)
+porcentaje_cluster.2 <- round(prop.table(cluster2)*100,2)
+# ·····················································
+pacientes_cluster3 <- data %>% filter (kmeans == '3')
+cluster3 <- table(pacientes_cluster3$diagnosis)
+porcentaje_cluster.3 <- round(prop.table(cluster3)*100,2)
+# ·····················································
+kable(cbind(rbind(cluster1,cluster2,cluster3),rbind(porcentaje_cluster.1,porcentaje_cluster.2,porcentaje_cluster.3)))
+```
+
+### **k-MEANS con k=2 sin TFF1 (variable), estandarizado**
+```{r kmeans 2 sin TFF1} 
+cantidad_clusters=2
+datos_para_cluster = data[3:6]
+set.seed(1)
+CL  = kmeans(scale(datos_para_cluster),cantidad_clusters)
+data$kmeans = CL$cluster
+par(mfrow=c(1,2))
+# -------------------------------------------------------------------------------------------
+# GRAFICO original
+col1 <- c('royalblue2','#ff7474ff')
+col1 <- col1[as.numeric(data$diagnosis)]
+
+scatterplot3d(data$edad,data$REG1B,data$LYVE1, color = alpha(col1,0.3), box=F,angle=45, pch = 19, grid = TRUE, tick.marks = FALSE, xlab = "edad", ylab = "REG1B", zlab = "LYVE1", main='Realidad')
+legend("topright", bty = "n", cex = .9, title = "Diagnóstico", c("normal", "maligno"), fill = c('royalblue2','#ff7474ff'))
+# -------------------------------------------------------------------------------------------
+# GRAFICO K=2 sin TFF1
+colors <- c('orange','#a25da2a5')
+colors <- colors[as.numeric(data$kmeans)]
+
+scatterplot3d(data$edad,data$REG1B,data$LYVE1, color = alpha(colors,0.3), box=F,angle=45, pch = 19, grid = TRUE, tick.marks = FALSE, xlab = "edad", ylab = "REG1B", zlab = "LYVE1", main='Clustering')
+legend("topright", bty = "n", cex = .9, title = "Grupo k-means", c("1", "2"), fill = c('orange','#a25da2a5'))
+# -------------------------------------------------------------------------------------------
+# GRAFICO K=2 sin TFF1 en coordenadas ACP
+#conviene en un biplot ya que tengo las flechas de las variables originales
+ggbiplot(datos.pc, obs.scale=.01 ,var.scale=1, alpha=0.5,groups = as.factor(data$kmeans) )+
+        scale_color_manual(name="Grupo k-means", values=c("orange",'#a25da2a5',"darkgreen"),
+                           labels=c("1", "2","3")) + theme+
+        labs(x='PC1 (51.5% explicado)', y= 'PC2 (22.5% explicado)',
+             title= 'Representación del clustering utilizando k-means')+theme(legend.position=c(.865,.2)) 
+# ·····················································
+# cuántos pacientes de cada diagnóstico están en cada cluster:
+pacientes_cluster1 <- data %>% filter (kmeans == '1')
+cluster1 <- table(pacientes_cluster1$diagnosis)
+porcentaje_cluster.1 <- round(prop.table(cluster1)*100,2)
+pacientes_cluster2 <- data %>% filter (kmeans == '2')
+cluster2 <- table(pacientes_cluster2$diagnosis)
+porcentaje_cluster.2 <- round(prop.table(cluster2)*100,2)
+# ·····················································
+# Imprimo resultados
+kable(cbind(rbind(cluster1,cluster2),rbind(porcentaje_cluster.1,porcentaje_cluster.2)))
+```
+
+### **k-MEANS con k=2 sin REG1B ni creatinina (variable), estandarizado**
+```{r kmeans 2 sin REG1B ni creatinina} 
+set.seed(1234)
+cantidad_clusters=2
+datos_para_cluster = data[c(3,5,7)]
+CL  = kmeans(scale(datos_para_cluster),cantidad_clusters)
+data$kmeans = CL$cluster
+par(mfrow=c(1,2))
+# -------------------------------------------------------------------------------------------
+# GRAFICO K=2 original
+col1 <- c('royalblue2','#ff7474ff')
+col1 <- col1[as.numeric(data$diagnosis)]
+
+scatterplot3d(data$edad,data$TFF1,data$LYVE1, color = alpha(col1,0.3), box=F,angle=45, pch = 19, grid = TRUE, tick.marks = FALSE, xlab = "edad", ylab = "TFF1", zlab = "LYVE1", main='Realidad')
+legend("topright", bty = "n", cex = .9, title = "Diagnóstico", c("normal", "maligno"), fill = c('royalblue2','#ff7474ff'))
+
+colors <- c('orange','#a25da2a5')
+colors <- colors[as.numeric(data$kmeans)]
+# -------------------------------------------------------------------------------------------
+# GRAFICO K=2 sin creatinina ni REG1B (clusteres)
+scatterplot3d(data$edad,data$TFF1,data$LYVE1, color = alpha(colors,0.3), box=F,angle=45, pch = 19, grid = TRUE, tick.marks = FALSE, xlab = "edad", ylab = "TFF1", zlab = "LYVE1", main='Clustering')
+legend("topright", bty = "n", cex = .9, title = "Grupo k-means", c("1", "2"), fill = c('orange','#a25da2a5'))
+# -------------------------------------------------------------------------------------------
+# GRAFICO kmeans con k=2 sin variables, en coord ACP
+#conviene en un biplot ya que tengo las flechas de las variables originales
+ggbiplot(datos.pc, obs.scale=.01 ,var.scale=1, alpha=0.5,groups = as.factor(data$kmeans) )+
+        scale_color_manual(name="Grupo k-means", values=c("orange",'#a25da2a5',"darkgreen"),
+                           labels=c("1", "2","3")) + theme+
+        labs(x='PC1 (51.5% explicado)', y= 'PC2 (22.5% explicado)',
+             title= 'Representación del clustering utilizando k-means')+theme(legend.position=c(.865,.2)) 
+# ·····················································
+# cuántos pacientes de cada diagnóstico están en cada cluster:
+pacientes_cluster1 <- data %>% filter (kmeans == '1')
+cluster1 <- table(pacientes_cluster1$diagnosis)
+porcentaje_cluster.1 <- round(prop.table(cluster1)*100,2)
+pacientes_cluster2 <- data %>% filter (kmeans == '2')
+cluster2 <- table(pacientes_cluster2$diagnosis)
+porcentaje_cluster.2 <- round(prop.table(cluster2)*100,2)
+# ·····················································
+# Imprimo resultados
+kable(cbind(rbind(cluster1,cluster2),rbind(porcentaje_cluster.1,porcentaje_cluster.2)))
+```
+### **k-MEANS con k=2 sin REG1B ni creatinina (variable), estandarizado**
+**calculo de distribución de cada variable en los datos de acuerdo al diagnóstico o el cluster**
+**Análisis estadístico z para evaluar diferencia de medias entre dos grupos (TCL por n>30)**
+```{r kmeans 2 sin REG1B ni creatinina análisis de medias de todas las variables} 
+comp_media1 <- data %>% gather(-c(1,2,4,6,8), key = "var", value = "value") %>%
+        ggplot(aes(x = as.factor(diagnosis), y = value)) +theme(plot.margin = unit(c(2.0,0.4,0,.7), "cm"))+
+        geom_boxplot(aes(fill=diagnosis, alpha=0.6), outlier.colour='gray', outlier.shape=1, outlier.size=1) +
+        facet_wrap(~ var, scales = "free") +theme(legend.position='none')+
+        theme+labs(x="Diagnóstico", y= NULL)+scale_fill_manual(values=c('royalblue2','#ff7474ff'))
+
+data$kmeans <- factor(data$kmeans, levels= c(1,2))
+comp_media2 <-data %>% gather(-c(1,2,4,6,8), key = "var", value = "value") %>%
+        ggplot(aes(x = as.factor(kmeans), y = value)) +theme(plot.margin = unit(c(0.5,0.4,0,.7), "cm"))+
+        geom_boxplot(aes(fill=kmeans, alpha=0.6), outlier.colour='gray', outlier.shape=1, outlier.size=1) +
+        facet_wrap(~ var, scales = "free") +theme(legend.position='none')+
+        theme+labs(x="Cluster", y= NULL)+scale_fill_manual(values=c('orange','#a25da2a5'))
+
+plot_grid(comp_media1, comp_media2, nrow = 2,rel_heights = c(1, .8))+
+    annotate("text", x=.5, y=.9, size=4, label='atop(bold("Comparación de variables"),"según diagnóstico y cluster")', parse=TRUE)+
+        annotate("text", angle=90,x=0.02, y=.5, size=4, label='bold("Valor estandarizado de la variable")', parse=TRUE)
+
+# ya sabíamos del qqplot que las variables no son normales univariadas (si se separan por diagnóstico). por TLC, no obstante, uno puede aproximar las univariadas y hacer un test acorde para ver diferencias de medias
+
+pacientes_N <- data%>%filter(diagnosis=='normal')
+pacientes_M <- data%>%filter(diagnosis=='maligno')
+
+edad <- z.test(pacientes_N$edad, sigma.x=sd(pacientes_N$edad), pacientes_M$edad, sigma.y=sd(pacientes_M$edad), conf.level=0.95)$p.value
+LYVE1 <- z.test(pacientes_N$LYVE1, sigma.x=sd(pacientes_N$LYVE1), pacientes_M$LYVE1, sigma.y=sd(pacientes_M$LYVE1), conf.level=0.95)$p.value
+TFF1 <- z.test(pacientes_N$TFF1, sigma.x=sd(pacientes_N$TFF1), pacientes_M$TFF1, sigma.y=sd(pacientes_M$TFF1), conf.level=0.95)$p.value
+
+pacientes_1 <- data%>%filter(kmeans=='1')
+pacientes_2 <- data%>%filter(kmeans=='2')
+
+edad_c <- z.test(pacientes_1$edad, sigma.x=sd(pacientes_1$edad), pacientes_2$edad, sigma.y=sd(pacientes_2$edad), conf.level=0.95)$p.value
+LYVE1_C <- z.test(pacientes_1$LYVE1, sigma.x=sd(pacientes_1$LYVE1), pacientes_2$LYVE1, sigma.y=sd(pacientes_2$LYVE1), conf.level=0.95)$p.value
+TFF1_c <- z.test(pacientes_1$TFF1, sigma.x=sd(pacientes_1$TFF1), pacientes_2$TFF1, sigma.y=sd(pacientes_2$TFF1), conf.level=0.95)$p.value
+
+variable <- c('diagnóstico','cluster')
+# Imprimo resultados
+kable(rbind(variable,cbind(rbind(edad, LYVE1, TFF1),rbind(edad_c, LYVE1_C, TFF1_c))))
+```
+
+### **Clustering jerárquico con muestra balanceada (para diagnóstico) de tamaño n=100**
+### **Cálculo de matriz de distancias**
+
+Euclidea
+```{r sample 100 y calculo distancias euclideas}
+# Elijo un subset de 100 datos para realizar el dendograma
+cantidad_clusters=2
+set.seed(1407)
+par(mfcol = c(1,1))
+data_c_diag = data[-c(2,8)] # sin sexo ni kmeans columns
+sample_cluster1 <- data_c_diag[sample(1:nrow(data_c_diag), 100,replace=FALSE),]
+sample_cluster <- as.data.frame(scale(sample_cluster1[,2:6]))
+sample_cluster$diagnosis <- sample_cluster1$diagnosis
+sample_cluster <- sample_cluster%>%dplyr::select(6,1:5)
+# Imprimo cuántos valores hay en cada categoría de la variable diagnóstico en mi muestra de n=100
+kable(table(sample_cluster$diagnosis))
+# Escalo los datos y hago PCA
+datos.pc2 = prcomp(sample_cluster[-1],scale = TRUE)
+# Matriz de distancias euclídeas 
+mat_dist <- dist(x = sample_cluster[-1], method = "euclidean") 
+# Dendrogramas (según el tipo de segmentación jerárquica aplicada)  
+hc_complete <- hclust(d = mat_dist, method = "complete") 
+hc_average  <- hclust(d = mat_dist, method = "average")
+hc_single   <- hclust(d = mat_dist, method = "single")
+hc_ward     <- hclust(d = mat_dist, method = "ward.D2")
+#calculo del coeficiente de correlacion cofenetico
+completo <- round(cor(x = mat_dist, cophenetic(hc_complete)),3)
+promedio <- round(cor(x = mat_dist, cophenetic(hc_average)),3)
+simple <- round(cor(x = mat_dist, cophenetic(hc_single)),3)
+ward <- round(cor(x = mat_dist, cophenetic(hc_ward)),3)
+valores_coef <- cbind(completo,promedio,simple,ward)
+# Imprimo valores de coeficiente cofenético
+kable(valores_coef)
+``` 
+Manhattan (esta es la que informo en TP, porque da mejores resultados)
+```{r sample 100 y calculo distancias manhattan}
+# mismo subset
+cantidad_clusters=2
+set.seed(1407)
+par(mfcol = c(1,1))
+data_c_diag = data[-c(2,8)] # sin sexo ni kmeans columns
+sample_cluster1 <- data_c_diag[sample(1:nrow(data_c_diag), 100,replace=FALSE),]
+sample_cluster <- as.data.frame(scale(sample_cluster1[,2:6]))
+sample_cluster$diagnosis <- sample_cluster1$diagnosis
+sample_cluster <- sample_cluster%>%dplyr::select(6,1:5)
+# Escalo datos y hago PCA
+datos.pc2 = prcomp(sample_cluster[-1],scale = TRUE)
+# Matriz de distancias manhattan 
+mat_dist <- dist(x = sample_cluster[-1], method = "manhattan") 
+# Dendrogramas (según el tipo de segmentación jerárquica aplicada)  
+hc_complete <- hclust(d = mat_dist, method = "complete") 
+hc_average  <- hclust(d = mat_dist, method = "average")
+hc_single   <- hclust(d = mat_dist, method = "single")
+hc_ward     <- hclust(d = mat_dist, method = "ward.D2")
+#calculo del coeficiente de correlacion cofenetico
+completo <- round(cor(x = mat_dist, cophenetic(hc_complete)),3)
+promedio <- round(cor(x = mat_dist, cophenetic(hc_average)),3)
+simple <- round(cor(x = mat_dist, cophenetic(hc_single)),3)
+ward <- round(cor(x = mat_dist, cophenetic(hc_ward)),3)
+valores_coef <- cbind(completo,promedio,simple,ward)
+# Imprimo valores de coeficiente cofenético
+kable(valores_coef)
+```
+
+### **CLUSTERING JERÁRQUICO con clusters= 2**
+```{r vals_a_df_2}
+# Armo clusters
+jer_ward<-cutree(hc_ward,k=cantidad_clusters)           
+jer_average<-cutree(hc_average,k=cantidad_clusters)      
+jer_complete<-cutree(hc_complete,k=cantidad_clusters)           
+jer_single<-cutree(hc_single,k=cantidad_clusters)     
+# Agrego cluster a dataframe
+sample_cluster$jer_ward=jer_ward
+sample_cluster$jer_average=jer_average
+sample_cluster$jer_complete=jer_complete
+sample_cluster$jer_single=jer_single
+```
+
+Construcción de dendograma con distancia Ward
+```{r dendogramas k2-1}
+# construccion de dendograma WARD
+mar = c(5.1, 4.1, 4.1, 2.1) 
+pch=c('royalblue2','#ff7474ff') 
+cols=alpha(pch[sample_cluster$diagnosis[order.dendrogram(as.dendrogram(hc_ward))]],0.7)
+dend_ward <- color_branches(as.dendrogram(hc_ward), k = 2)
+dend_ward <- set(dend_ward, "labels_cex", 0.1)
+grafico1 <- dend_ward %>%  set("leaves_pch",19)%>%
+        set("leaves_cex", .9) %>% set("leaves_col", cols) %>% 
+        plot(main = "Dendrograma jerárquico", ylab='Distancia',cex.lab=1, cex.axis=.6)+
+        mtext(side = 3, line = 0.5, at = 1, adj = -1.8, 'Distancia Ward')+
+        mtext(side = 1, line = 0.5, at = 1, adj = -4.1, 'Paciente')
+legend(5,28, title='Diagnóstico', 
+     legend = c("normal" , "maligno"), 
+     col = c('royalblue2','#ff7474ff') , 
+     pch = c(19,19), bty = "n",  pt.cex = 1.5, cex = 0.8 , 
+     text.col = "black", horiz = FALSE, inset = c(0, 0.1))
+```
+
+Construcción de dendograma con distancia promedio
+```{r dendogramas k2-2}
+cols_a=alpha(pch[sample_cluster$diagnosis[order.dendrogram(as.dendrogram(hc_average))]],0.7)
+dend_average <- color_branches(as.dendrogram(hc_average), k = 2)
+dend_average <- set(dend_average, "labels_cex", 0.1)
+grafico2 <- dend_average %>% set("leaves_pch",19) %>%  
+        set("leaves_cex", .8) %>%  set("leaves_col", cols_a) %>% 
+        plot(main = "Dendrograma jerárquico",  ylab='Distancia',cex.lab=1, cex.axis=.6)+
+        mtext(side = 3, line = 0.5, at = 1, adj = -1.3, 'Distancia Promedio')+
+        mtext(side = 1, line = 0.5, at = 1, adj = -4.1, 'Paciente')
+legend(76,8, title='Diagnóstico', 
+     legend = c("normal" , "maligno"), 
+     col = c('royalblue2','#ff7474ff') , 
+     pch = c(19,19), bty = "n",  pt.cex = 1.5, cex = 0.8 , 
+     text.col = "black", horiz = FALSE, inset = c(0, 0.1))
+```
+
+Construcción de dendograma con distancia completa
+```{r dendogramas k2-3}
+cols_c=alpha(pch[sample_cluster$diagnosis[order.dendrogram(as.dendrogram(hc_complete))]],0.7)
+dend_complete <- color_branches(as.dendrogram(hc_complete), k = 2)
+dend_complete <- set(dend_complete, "labels_cex", 0.1)
+grafico3 <- dend_complete %>% set("leaves_pch",19) %>%  # node point type
+        set("leaves_cex", .8) %>%  # node point size
+        set("leaves_col", cols_c) %>% #node point color
+        plot(main = "Dendrograma jerárquico", ylab='Distancia',cex.lab=1, cex.axis=.6)+
+        mtext(side = 3, line = 0.5, at = 1, adj = -1.3, 'Distancia Completa')+
+        mtext(side = 1, line = 0.5, at = 1, adj = -4.1, 'Paciente')
+legend(85,16, title='Diagnóstico', 
+     legend = c("normal" , "maligno"), 
+     col = c('royalblue2','#ff7474ff') , 
+     pch = c(19,19), bty = "n",  pt.cex = 1.5, cex = 0.8 , 
+     text.col = "black", horiz = FALSE, inset = c(0, 0.1))
+```
+
+Construcción de dendograma con distancia simple
+```{r dendogramas k2-4}
+cols_s=alpha(pch[sample_cluster$diagnosis[order.dendrogram(as.dendrogram(hc_single))]],0.7)
+dend_single <- color_branches(as.dendrogram(hc_single), k = 2)
+dend_single <- set(dend_single, "labels_cex", 0.1)
+grafico4 <- dend_single %>% set("leaves_pch",19) %>%  # node point type
+        set("leaves_cex", .8) %>%  # node point size
+        set("leaves_col", cols_s) %>% #node point color
+        plot(main = "Dendrograma jerárquico", ylab='Distancia',cex.lab=1, cex.axis=.7)+
+        mtext(side = 3, line = 0.5, at = 1, adj = -1.7, 'Distancia Simple')+
+        mtext(side = 1, line = 0.5, at = 1, adj = -4.1, 'Paciente')
+legend(80,7, title='Diagnóstico', 
+     legend = c("normal" , "maligno"), 
+     col = c('royalblue2','#ff7474ff') , 
+     pch = c(19,19), bty = "n",  pt.cex = 1.5, cex = 0.8 , 
+     text.col = "black", horiz = FALSE, inset = c(0, 0.1))
+```
+
+Cálculo de cuántos pacientes de cada diagnóstico hay en cada cluster según las distintas distancias utilizadas
+Ward
+```{r ward2}
+# ·····················································
+# cuántos pacientes de cada diagnóstico están en cada cluster:
+ward_cluster1 <- sample_cluster %>% filter (jer_ward == '1')
+cluster1 <- table(ward_cluster1$diagnosis)
+Ward_cluster.1 <- round(prop.table(cluster1)*100,2)
+# ·····················································
+ward_cluster2 <- sample_cluster %>% filter (jer_ward == '2')
+cluster2 <- table(ward_cluster2$diagnosis)
+Ward_cluster.2 <- round(prop.table(cluster2)*100,2)
+
+kable(cbind(rbind(cluster1,cluster2),rbind(Ward_cluster.1,Ward_cluster.2)))
+```
+Promedio
+```{r prom2}
+# ·····················································
+promedio_cluster1 <- sample_cluster %>% filter (jer_average == '1')
+cluster1 <- table(promedio_cluster1$diagnosis)
+promedio_cluster.1 <- round(prop.table(cluster1)*100,2)
+# ·····················································
+promedio_cluster2 <- sample_cluster %>% filter (jer_average == '2')
+cluster2 <- table(promedio_cluster2$diagnosis)
+promedio_cluster.2 <- round(prop.table(cluster2)*100,2)
+
+kable(cbind(rbind(cluster1,cluster2),rbind(promedio_cluster.1,promedio_cluster.2)))
+```
+Completo
+```{r comple2}
+# ·····················································
+completo_cluster1 <- sample_cluster %>% filter (jer_complete == '1')
+cluster1 <- table(completo_cluster1$diagnosis)
+completo_cluster.1 <- round(prop.table(cluster1)*100,2)
+# ·····················································
+completo_cluster2 <- sample_cluster %>% filter (jer_complete == '2')
+cluster2 <- table(completo_cluster2$diagnosis)
+completo_cluster.2 <- round(prop.table(cluster2)*100,2)
+
+kable(cbind(rbind(cluster1,cluster2),rbind(completo_cluster.1,completo_cluster.2)))
+```
+Simple
+```{r simple2}
+# ·····················································
+simple_cluster1 <- sample_cluster %>% filter (jer_single == '1')
+cluster1 <- table(simple_cluster1$diagnosis)
+simple_cluster.1 <- round(prop.table(cluster1)*100,2)
+# ·····················································
+simple_cluster2 <- sample_cluster %>% filter (jer_single == '2')
+cluster2 <- table(simple_cluster2$diagnosis)
+simple_cluster.2 <- round(prop.table(cluster2)*100,2)
+
+
+kable(cbind(rbind(cluster1,cluster2),rbind(simple_cluster.1,simple_cluster.2)))
+```
+
+### **CLUSTERING JERÁRQUICO 3**
+```{r vasl_a_df3}
+# Armo clusters
+cantidad_clusters=3
+
+jer_ward3<-cutree(hc_ward,k=cantidad_clusters)           
+jer_average3<-cutree(hc_average,k=cantidad_clusters)           
+jer_complete3<-cutree(hc_complete,k=cantidad_clusters)           
+jer_single3<-cutree(hc_single,k=cantidad_clusters)       
+# Agrego clusters al dataframe
+sample_cluster$jer_ward3=jer_ward3
+sample_cluster$jer_average3=jer_average3
+sample_cluster$jer_complete3=jer_complete3
+sample_cluster$jer_single3=jer_single3
+```
+
+Construcción de dendograma con distancia Ward
+```{r dendogramas k3_w3}
+mar = c(5.1, 4.1, 4.1, 2.1) 
+cols_w=alpha(pch[sample_cluster$diagnosis[order.dendrogram(as.dendrogram(hc_ward))]],0.7)
+dend_ward <- color_branches(as.dendrogram(hc_ward), k = 3)
+dend_ward <- set(dend_ward, "labels_cex", 0.1)
+grafico5 <- dend_ward %>% set("leaves_pch",19) %>%  # node point type
+        set("leaves_cex", .8) %>%  # node point size
+        set("leaves_col", cols_w) %>% #node point color
+        plot(main = "Dendrograma jerárquico", ylab='Distancia',cex.lab=1, cex.axis=.6)+
+        mtext(side = 3, line = 0.5, at = 1, adj = -1.8, 'Distancia Ward')+
+        mtext(side = 1, line = 0.5, at = 1, adj = -4.1, 'Paciente')
+legend(3,32, title='Diagnóstico', 
+     legend = c("normal" , "maligno"), 
+     col = c('royalblue2','#ff7474ff') , 
+     pch = c(19,19), bty = "n",  pt.cex = 1.5, cex = 0.8 , 
+     text.col = "black", horiz = FALSE, inset = c(0, 0.1))
+```
+
+Construcción de dendograma con distancia Promedio
+```{r dendogramas k3_a3}
+dend_average <- color_branches(as.dendrogram(hc_average), k = 3)
+dend_average <- set(dend_average, "labels_cex", 0.1)
+grafico6 <- dend_average %>% set("leaves_pch",19) %>%  # node point type
+        set("leaves_cex", .8) %>%  # node point size
+        set("leaves_col", cols_a) %>% #node point color
+        plot(main = "Dendrograma jerárquico",  ylab='Distancia',cex.lab=1, cex.axis=.6)+
+        mtext(side = 3, line = 0.5, at = 1, adj = -1.4, 'Distancia Promedio')+
+        mtext(side = 1, line = 0.5, at = 1, adj = -4.1, 'Paciente')
+legend(90,12.2, title='Diagnóstico', 
+     legend = c("normal" , "maligno"), 
+     col = c('royalblue2','#ff7474ff') , 
+     pch = c(19,19), bty = "n",  pt.cex = 1.5, cex = 0.8 , 
+     text.col = "black", horiz = FALSE, inset = c(0, 0.1))
+```
+
+Construcción de dendograma con distancia Completa
+```{r dendogramas k3_c3}
+dend_complete <- color_branches(as.dendrogram(hc_complete), k = 3)
+dend_complete <- set(dend_complete, "labels_cex", 0.1)
+grafico7 <- dend_complete %>% set("leaves_pch",19) %>%  # node point type
+        set("leaves_cex", .8) %>%  # node point size
+        set("leaves_col", cols_c) %>% #node point color
+        plot(main = "Dendrograma jerárquico", ylab='Distancia',cex.lab=1, cex.axis=.6)+
+        mtext(side = 3, line = 0.5, at = 1, adj = -1.4, 'Distancia Completa')+
+        mtext(side = 1, line = 0.5, at = 1, adj = -4.1, 'Paciente')
+legend(85,18, title='Diagnóstico', 
+     legend = c("normal" , "maligno"), 
+     col = c('royalblue2','#ff7474ff') , 
+     pch = c(19,19), bty = "n",  pt.cex = 1.5, cex = 0.8 , 
+     text.col = "black", horiz = FALSE, inset = c(0, 0.1))
+```
+
+Construcción de dendograma con distancia Simple
+```{r dendogramas k3_s3}
+dend_single <- color_branches(as.dendrogram(hc_single), k = 3)
+dend_single <- set(dend_single, "labels_cex", 0.1)
+grafico8 <- dend_single %>% set("leaves_pch",19) %>%  # node point type
+        set("leaves_cex", .8) %>%  # node point size
+        set("leaves_col", cols_s) %>% #node point color
+        plot(main = "Dendrograma jerárquico", ylab='Distancia',cex.lab=1, cex.axis=.7)+
+        mtext(side = 3, line = 0.5, at = 1, adj = -1.6, 'Distancia Simple')+
+        mtext(side = 1, line = 0.5, at = 1, adj = -4.1, 'Paciente')
+legend(80,7, title='Diagnóstico', 
+     legend = c("normal" , "maligno"), 
+     col = c('royalblue2','#ff7474ff') , 
+     pch = c(19,19), bty = "n",  pt.cex = 1.5, cex = 0.8 , 
+     text.col = "black", horiz = FALSE, inset = c(0, 0.1))
+```
+
+Cálculo de cuántos pacientes de cada diagnóstico hay en cada cluster según las distintas distancias utilizadas
+Ward
+```{r ward k3}
+ward_cluster1 <- sample_cluster %>% filter (jer_ward3 == '1')
+cluster1 <- table(ward_cluster1$diagnosis)
+Ward_cluster.1 <- round(prop.table(cluster1)*100,2)
+# ·····················································
+ward_cluster2 <- sample_cluster %>% filter (jer_ward3 == '2')
+cluster2 <- table(ward_cluster2$diagnosis)
+Ward_cluster.2 <- round(prop.table(cluster2)*100,2)
+# ·····················································
+ward_cluster3 <- sample_cluster %>% filter (jer_ward3 == '3')
+cluster3 <- table(ward_cluster3$diagnosis)
+Ward_cluster.3 <- round(prop.table(cluster3)*100,2)
+
+kable(cbind(rbind(cluster1,cluster2,cluster3),rbind(Ward_cluster.1,Ward_cluster.2,Ward_cluster.3)))
+```
+Promedio
+```{r promedio k3}
+promedio_cluster1 <- sample_cluster %>% filter (jer_average3 == '1')
+cluster1 <- table(promedio_cluster1$diagnosis)
+promedio_cluster.1 <- round(prop.table(cluster1)*100,2)
+# ·····················································
+promedio_cluster2 <- sample_cluster %>% filter (jer_average3 == '2')
+cluster2 <- table(promedio_cluster2$diagnosis)
+promedio_cluster.2 <- round(prop.table(cluster2)*100,2)
+# ·····················································
+promedio_cluster3 <- sample_cluster %>% filter (jer_average3 == '3')
+cluster3 <- table(promedio_cluster3$diagnosis)
+promedio_cluster.3 <- round(prop.table(cluster3)*100,2)
+# ·····················································
+
+kable(cbind(rbind(cluster1,cluster2,cluster3),rbind(promedio_cluster.1,promedio_cluster.2,promedio_cluster.3)))
+```
+Completo
+```{r completo k3}
+completo_cluster1 <- sample_cluster %>% filter (jer_complete3 == '1')
+cluster1 <- table(completo_cluster1$diagnosis)
+completo_cluster.1 <- round(prop.table(cluster1)*100,2)
+# ·····················································
+completo_cluster2 <- sample_cluster %>% filter (jer_complete3 == '2')
+cluster2 <- table(completo_cluster2$diagnosis)
+completo_cluster.2 <- round(prop.table(cluster2)*100,2)
+# ·····················································
+completo_cluster3 <- sample_cluster %>% filter (jer_complete3 == '3')
+cluster3 <- table(completo_cluster3$diagnosis)
+completo_cluster.3 <- round(prop.table(cluster3)*100,2)
+
+kable(cbind(rbind(cluster1,cluster2,cluster3),rbind(completo_cluster.1,completo_cluster.2,completo_cluster.3)))
+```
+Simple
+```{r simple k3}
+simple_cluster1 <- sample_cluster %>% filter (jer_single3 == '1')
+cluster1 <- table(simple_cluster1$diagnosis)
+simple_cluster.1 <- round(prop.table(cluster1)*100,2)
+# ·····················································
+simple_cluster2 <- sample_cluster %>% filter (jer_single3 == '2')
+cluster2 <- table(simple_cluster2$diagnosis)
+simple_cluster.2 <- round(prop.table(cluster2)*100,2)
+# ·····················································
+simple_cluster3 <- sample_cluster %>% filter (jer_single3 == '3')
+cluster3 <- table(simple_cluster3$diagnosis)
+simple_cluster.3 <- round(prop.table(cluster3)*100,2)
+
+kable(cbind(rbind(cluster1,cluster2,cluster3),rbind(simple_cluster.1,simple_cluster.2,simple_cluster.3)))
+```
+
+### **CLUSTERING JERÁRQUICO 2 sin TFF1**
+```{r vals_a_df_2 sT}
+# mismo subset
+cantidad_clusters=2
+set.seed(1407)
+par(mfcol = c(1,1))
+data_c_diag = data[-c(2,8)] # sin sexo ni kmeans columns
+sample_cluster1 <- data_c_diag[sample(1:nrow(data_c_diag), 100,replace=FALSE),]
+sample_cluster <- as.data.frame(scale(sample_cluster1[,2:6]))
+sample_cluster$diagnosis <- sample_cluster1$diagnosis
+sample_cluster_sinTFF <- sample_cluster%>%dplyr::select(6,1:4) # aca le saco TFF1
+# Matriz de distancias manhattan 
+mat_dist <- dist(x = sample_cluster[-1], method = "manhattan") 
+# Dendrogramas (según el tipo de segmentación jerárquica aplicada)  
+hc_complete <- hclust(d = mat_dist, method = "complete") 
+hc_average  <- hclust(d = mat_dist, method = "average")
+hc_single   <- hclust(d = mat_dist, method = "single")
+hc_ward     <- hclust(d = mat_dist, method = "ward.D2")
+# Calculo del coeficiente de correlacion cofenetico
+completo <- round(cor(x = mat_dist, cophenetic(hc_complete)),3)
+promedio <- round(cor(x = mat_dist, cophenetic(hc_average)),3)
+simple <- round(cor(x = mat_dist, cophenetic(hc_single)),3)
+ward <- round(cor(x = mat_dist, cophenetic(hc_ward)),3)
+valores_coef <- cbind(completo,promedio,simple,ward)
+# Imprimo valores de coeficiente cofenético
+kable(valores_coef)
+# Armo clusters
+jer_ward<-cutree(hc_ward,k=cantidad_clusters)           
+jer_average<-cutree(hc_average,k=cantidad_clusters)      
+jer_complete<-cutree(hc_complete,k=cantidad_clusters)           
+jer_single<-cutree(hc_single,k=cantidad_clusters)          
+# Agrego info a data frame
+sample_cluster_sinTFF$jer_ward=jer_ward
+sample_cluster_sinTFF$jer_average=jer_average
+sample_cluster_sinTFF$jer_complete=jer_complete
+sample_cluster_sinTFF$jer_single=jer_single
+```
+
+Construcción de dendograma con distancia Ward
+```{r dendogramas k2-1 sT}
+# construccion de dendogramas 
+mar = c(5.1, 4.1, 4.1, 2.1) 
+pch=c('royalblue2','#ff7474ff') 
+cols=alpha(pch[sample_cluster_sinTFF$diagnosis[order.dendrogram(as.dendrogram(hc_ward))]],0.7)
+dend_ward <- color_branches(as.dendrogram(hc_ward), k = 2)
+dend_ward <- set(dend_ward, "labels_cex", 0.1)
+grafico1 <- dend_ward %>%  set("leaves_pch",19)%>%
+        set("leaves_cex", .9) %>%  # node point size
+        set("leaves_col", cols) %>% #node point color
+        plot(main = "Dendrograma jerárquico", ylab='Distancia',cex.lab=1, cex.axis=.6)+
+        mtext(side = 3, line = 0.5, at = 1, adj = -1.8, 'Distancia Ward')+
+        mtext(side = 1, line = 0.5, at = 1, adj = -4.1, 'Paciente')
+legend(85,40, title='Diagnóstico', 
+     legend = c("normal" , "maligno"), 
+     col = c('royalblue2','#ff7474ff') , 
+     pch = c(19,19), bty = "n",  pt.cex = 1.5, cex = 0.8 , 
+     text.col = "black", horiz = FALSE, inset = c(0, 0.1))
+```
+
+Construcción de dendograma con distancia Promedio
+```{r dendogramas k2-2 sT}
+cols_a=alpha(pch[sample_cluster_sinTFF$diagnosis[order.dendrogram(as.dendrogram(hc_average))]],0.7)
+dend_average <- color_branches(as.dendrogram(hc_average), k = 2)
+dend_average <- set(dend_average, "labels_cex", 0.1)
+grafico2 <- dend_average %>% set("leaves_pch",19) %>%  # node point type
+        set("leaves_cex", .8) %>%  # node point size
+        set("leaves_col", cols_a) %>% #node point color
+        plot(main = "Dendrograma jerárquico",  ylab='Distancia',cex.lab=1, cex.axis=.6)+
+        mtext(side = 3, line = 0.5, at = 1, adj = -1.3, 'Distancia Promedio')+
+        mtext(side = 1, line = 0.5, at = 1, adj = -4.1, 'Paciente')
+legend(90,14.2, title='Diagnóstico', 
+     legend = c("normal" , "maligno"), 
+     col = c('royalblue2','#ff7474ff') , 
+     pch = c(19,19), bty = "n",  pt.cex = 1.5, cex = 0.8 , 
+     text.col = "black", horiz = FALSE, inset = c(0, 0.1))
+```
+
+Construcción de dendograma con distancia completa
+```{r dendogramas k2-3 sT}
+cols_c=alpha(pch[sample_cluster_sinTFF$diagnosis[order.dendrogram(as.dendrogram(hc_complete))]],0.7)
+dend_complete <- color_branches(as.dendrogram(hc_complete), k = 2)
+dend_complete <- set(dend_complete, "labels_cex", 0.1)
+grafico3 <- dend_complete %>% set("leaves_pch",19) %>%  # node point type
+        set("leaves_cex", .8) %>%  # node point size
+        set("leaves_col", cols_c) %>% #node point color
+        plot(main = "Dendrograma jerárquico", ylab='Distancia',cex.lab=1, cex.axis=.6)+
+        mtext(side = 3, line = 0.5, at = 1, adj = -1.3, 'Distancia Completa')+
+        mtext(side = 1, line = 0.5, at = 1, adj = -4.1, 'Paciente')
+legend(5,18, title='Diagnóstico', 
+     legend = c("normal" , "maligno"), 
+     col = c('royalblue2','#ff7474ff') , 
+     pch = c(19,19), bty = "n",  pt.cex = 1.5, cex = 0.8 , 
+     text.col = "black", horiz = FALSE, inset = c(0, 0.1))
+```
+
+Construcción de dendograma con distancia Simple
+```{r dendogramas k2-4 sT}
+cols_s=alpha(pch[sample_cluster_sinTFF$diagnosis[order.dendrogram(as.dendrogram(hc_single))]],0.7)
+dend_single <- color_branches(as.dendrogram(hc_single), k = 2)
+dend_single <- set(dend_single, "labels_cex", 0.1)
+grafico4 <- dend_single %>% set("leaves_pch",19) %>%  # node point type
+        set("leaves_cex", .8) %>%  # node point size
+        set("leaves_col", cols_s) %>% #node point color
+        plot(main = "Dendrograma jerárquico", ylab='Distancia',cex.lab=1, cex.axis=.7)+
+        mtext(side = 3, line = 0.5, at = 1, adj = -1.7, 'Distancia Simple')+
+        mtext(side = 1, line = 0.5, at = 1, adj = -4.1, 'Paciente')
+legend(80,7, title='Diagnóstico', 
+     legend = c("normal" , "maligno"), 
+     col = c('royalblue2','#ff7474ff') , 
+     pch = c(19,19), bty = "n",  pt.cex = 1.5, cex = 0.8 , 
+     text.col = "black", horiz = FALSE, inset = c(0, 0.1))
+```
+
+Ward
+```{r ward2 sT}
+# ·····················································
+# cuántos pacientes de cada diagnóstico están en cada cluster:
+ward_cluster1 <- sample_cluster_sinTFF %>% filter (jer_ward == '1')
+cluster1 <- table(ward_cluster1$diagnosis)
+Ward_cluster.1 <- round(prop.table(cluster1)*100,2)
+# ·····················································
+ward_cluster2 <- sample_cluster_sinTFF %>% filter (jer_ward == '2')
+cluster2 <- table(ward_cluster2$diagnosis)
+Ward_cluster.2 <- round(prop.table(cluster2)*100,2)
+
+kable(cbind(rbind(cluster1,cluster2),rbind(Ward_cluster.1,Ward_cluster.2)))
+```
+Promedio
+```{r prom2 sT}
+# ·····················································
+promedio_cluster1 <- sample_cluster_sinTFF %>% filter (jer_average == '1')
+cluster1 <- table(promedio_cluster1$diagnosis)
+promedio_cluster.1 <- round(prop.table(cluster1)*100,2)
+# ·····················································
+promedio_cluster2 <- sample_cluster_sinTFF %>% filter (jer_average == '2')
+cluster2 <- table(promedio_cluster2$diagnosis)
+promedio_cluster.2 <- round(prop.table(cluster2)*100,2)
+
+kable(cbind(rbind(cluster1,cluster2),rbind(promedio_cluster.1,promedio_cluster.2)))
+```
+_ompleta
+```{r comple2 sT}
+# ·····················································
+completo_cluster1 <- sample_cluster_sinTFF %>% filter (jer_complete == '1')
+cluster1 <- table(completo_cluster1$diagnosis)
+completo_cluster.1 <- round(prop.table(cluster1)*100,2)
+# ·····················································
+completo_cluster2 <- sample_cluster_sinTFF %>% filter (jer_complete == '2')
+cluster2 <- table(completo_cluster2$diagnosis)
+completo_cluster.2 <- round(prop.table(cluster2)*100,2)
+
+kable(cbind(rbind(cluster1,cluster2),rbind(completo_cluster.1,completo_cluster.2)))
+```
+Simple
+```{r simple2 sT}
+# ·····················································
+simple_cluster1 <- sample_cluster_sinTFF %>% filter (jer_single == '1')
+cluster1 <- table(simple_cluster1$diagnosis)
+simple_cluster.1 <- round(prop.table(cluster1)*100,2)
+# ·····················································
+simple_cluster2 <- sample_cluster_sinTFF %>% filter (jer_single == '2')
+cluster2 <- table(simple_cluster2$diagnosis)
+simple_cluster.2 <- round(prop.table(cluster2)*100,2)
+
+
+kable(cbind(rbind(cluster1,cluster2),rbind(simple_cluster.1,simple_cluster.2)))
+```
+
+### *CLUSTERING JERÁRQUICO 2 sin REG1B ni creatinina*
+```{r vals_a_df_2 sTC}
+
+# mismo subset
+cantidad_clusters=2
+set.seed(1407)
+par(mfcol = c(1,1))
+data_c_diag = data[-c(2,8)] # sin sexo ni kmeans columns
+sample_cluster1 <- data_c_diag[sample(1:nrow(data_c_diag), 100,replace=FALSE),]
+sample_cluster <- as.data.frame(scale(sample_cluster1[,2:6]))
+sample_cluster$diagnosis <- sample_cluster1$diagnosis
+sample_cluster_sinTFFniC <- sample_cluster%>%dplyr::select(6,1,3,5) # aca le saco RGB1 y creatinina
+# Matriz de distancias manhattan 
+mat_dist <- dist(x = sample_cluster[-1], method = "manhattan") 
+# Dendrogramas (según el tipo de segmentación jerárquica aplicada)  
+hc_complete <- hclust(d = mat_dist, method = "complete") 
+hc_average  <- hclust(d = mat_dist, method = "average")
+hc_single   <- hclust(d = mat_dist, method = "single")
+hc_ward     <- hclust(d = mat_dist, method = "ward.D2")
+# Calculo del coeficiente de correlacion cofenetico
+completo <- round(cor(x = mat_dist, cophenetic(hc_complete)),3)
+promedio <- round(cor(x = mat_dist, cophenetic(hc_average)),3)
+simple <- round(cor(x = mat_dist, cophenetic(hc_single)),3)
+ward <- round(cor(x = mat_dist, cophenetic(hc_ward)),3)
+valores_coef <- cbind(completo,promedio,simple,ward)
+# Imprimo valores de coeficiente cofenético
+kable(valores_coef)
+# Armo clusters
+jer_ward<-cutree(hc_ward,k=cantidad_clusters)           
+jer_average<-cutree(hc_average,k=cantidad_clusters)      
+jer_complete<-cutree(hc_complete,k=cantidad_clusters)           
+jer_single<-cutree(hc_single,k=cantidad_clusters)          
+# Agrego info a data frame
+sample_cluster_sinTFFniC$jer_ward=jer_ward
+sample_cluster_sinTFFniC$jer_average=jer_average
+sample_cluster_sinTFFniC$jer_complete=jer_complete
+sample_cluster_sinTFFniC$jer_single=jer_single
+```
+
+Construcción de dendograma con distancia Ward
+```{r dendogramas k2-1 sTC}
+# construccion de dendogramas 
+mar = c(5.1, 4.1, 4.1, 2.1) 
+pch=c('royalblue2','#ff7474ff') 
+cols=alpha(pch[sample_cluster_sinTFFniC$diagnosis[order.dendrogram(as.dendrogram(hc_ward))]],0.7)
+dend_ward <- color_branches(as.dendrogram(hc_ward), k = 2)
+dend_ward <- set(dend_ward, "labels_cex", 0.1)
+grafico1 <- dend_ward %>%  set("leaves_pch",19)%>%
+        set("leaves_cex", .9) %>%  # node point size
+        set("leaves_col", cols) %>% #node point color
+        plot(main = "Dendrograma jerárquico", ylab='Distancia',cex.lab=1, cex.axis=.6)+
+        mtext(side = 3, line = 0.5, at = 1, adj = -1.8, 'Distancia Ward')+
+        mtext(side = 1, line = 0.5, at = 1, adj = -4.1, 'Paciente')
+legend(85,40, title='Diagnóstico', 
+     legend = c("normal" , "maligno"), 
+     col = c('royalblue2','#ff7474ff') , 
+     pch = c(19,19), bty = "n",  pt.cex = 1.5, cex = 0.8 , 
+     text.col = "black", horiz = FALSE, inset = c(0, 0.1))
+```
+
+Construcción de dendograma con distancia Promedio
+```{r dendogramas k2-2 sTC}
+cols_a=alpha(pch[sample_cluster_sinTFFniC$diagnosis[order.dendrogram(as.dendrogram(hc_average))]],0.7)
+dend_average <- color_branches(as.dendrogram(hc_average), k = 2)
+dend_average <- set(dend_average, "labels_cex", 0.1)
+grafico2 <- dend_average %>% set("leaves_pch",19) %>%  # node point type
+        set("leaves_cex", .8) %>%  # node point size
+        set("leaves_col", cols_a) %>% #node point color
+        plot(main = "Dendrograma jerárquico",  ylab='Distancia',cex.lab=1, cex.axis=.6)+
+        mtext(side = 3, line = 0.5, at = 1, adj = -1.3, 'Distancia Promedio')+
+        mtext(side = 1, line = 0.5, at = 1, adj = -4.1, 'Paciente')
+legend(90,14.2, title='Diagnóstico', 
+     legend = c("normal" , "maligno"), 
+     col = c('royalblue2','#ff7474ff') , 
+     pch = c(19,19), bty = "n",  pt.cex = 1.5, cex = 0.8 , 
+     text.col = "black", horiz = FALSE, inset = c(0, 0.1))
+```
+
+Construcción de dendograma con distancia Completa
+```{r dendogramas k2-3 sTC}
+cols_c=alpha(pch[sample_cluster_sinTFFniC$diagnosis[order.dendrogram(as.dendrogram(hc_complete))]],0.7)
+dend_complete <- color_branches(as.dendrogram(hc_complete), k = 2)
+dend_complete <- set(dend_complete, "labels_cex", 0.1)
+grafico3 <- dend_complete %>% set("leaves_pch",19) %>%  # node point type
+        set("leaves_cex", .8) %>%  # node point size
+        set("leaves_col", cols_c) %>% #node point color
+        plot(main = "Dendrograma jerárquico", ylab='Distancia',cex.lab=1, cex.axis=.6)+
+        mtext(side = 3, line = 0.5, at = 1, adj = -1.3, 'Distancia Completa')+
+        mtext(side = 1, line = 0.5, at = 1, adj = -4.1, 'Paciente')
+legend(5,18, title='Diagnóstico', 
+     legend = c("normal" , "maligno"), 
+     col = c('royalblue2','#ff7474ff') , 
+     pch = c(19,19), bty = "n",  pt.cex = 1.5, cex = 0.8 , 
+     text.col = "black", horiz = FALSE, inset = c(0, 0.1))
+```
+
+Construcción de dendograma con distancia Simple
+```{r dendogramas k2-4 sTC}
+cols_s=alpha(pch[sample_cluster_sinTFFniC$diagnosis[order.dendrogram(as.dendrogram(hc_single))]],0.7)
+dend_single <- color_branches(as.dendrogram(hc_single), k = 2)
+dend_single <- set(dend_single, "labels_cex", 0.1)
+grafico4 <- dend_single %>% set("leaves_pch",19) %>%  # node point type
+        set("leaves_cex", .8) %>%  # node point size
+        set("leaves_col", cols_s) %>% #node point color
+        plot(main = "Dendrograma jerárquico", ylab='Distancia',cex.lab=1, cex.axis=.7)+
+        mtext(side = 3, line = 0.5, at = 1, adj = -1.7, 'Distancia Simple')+
+        mtext(side = 1, line = 0.5, at = 1, adj = -4.1, 'Paciente')
+legend(80,7, title='Diagnóstico', 
+     legend = c("normal" , "maligno"), 
+     col = c('royalblue2','#ff7474ff') , 
+     pch = c(19,19), bty = "n",  pt.cex = 1.5, cex = 0.8 , 
+     text.col = "black", horiz = FALSE, inset = c(0, 0.1))
+```
+
+Ward
+```{r ward2 sTC}
+# ·····················································
+# cuántos pacientes de cada diagnóstico están en cada cluster:
+ward_cluster1 <- sample_cluster_sinTFFniC %>% filter (jer_ward == '1')
+cluster1 <- table(ward_cluster1$diagnosis)
+Ward_cluster.1 <- round(prop.table(cluster1)*100,2)
+# ·····················································
+ward_cluster2 <- sample_cluster_sinTFFniC %>% filter (jer_ward == '2')
+cluster2 <- table(ward_cluster2$diagnosis)
+Ward_cluster.2 <- round(prop.table(cluster2)*100,2)
+
+kable(cbind(rbind(cluster1,cluster2),rbind(Ward_cluster.1,Ward_cluster.2)))
+```
+Promedio
+```{r prom2 sTC}
+# ·····················································
+promedio_cluster1 <- sample_cluster_sinTFFniC %>% filter (jer_average == '1')
+cluster1 <- table(promedio_cluster1$diagnosis)
+promedio_cluster.1 <- round(prop.table(cluster1)*100,2)
+# ·····················································
+promedio_cluster2 <- sample_cluster_sinTFFniC %>% filter (jer_average == '2')
+cluster2 <- table(promedio_cluster2$diagnosis)
+promedio_cluster.2 <- round(prop.table(cluster2)*100,2)
+
+kable(cbind(rbind(cluster1,cluster2),rbind(promedio_cluster.1,promedio_cluster.2)))
+```
+Completa
+```{r comple2 sTC}
+# ·····················································
+completo_cluster1 <- sample_cluster_sinTFFniC %>% filter (jer_complete == '1')
+cluster1 <- table(completo_cluster1$diagnosis)
+completo_cluster.1 <- round(prop.table(cluster1)*100,2)
+# ·····················································
+completo_cluster2 <- sample_cluster_sinTFFniC %>% filter (jer_complete == '2')
+cluster2 <- table(completo_cluster2$diagnosis)
+completo_cluster.2 <- round(prop.table(cluster2)*100,2)
+
+kable(cbind(rbind(cluster1,cluster2),rbind(completo_cluster.1,completo_cluster.2)))
+```
+Simple
+```{r simple2 sTC}
+# ·····················································
+simple_cluster1 <- sample_cluster_sinTFFniC %>% filter (jer_single == '1')
+cluster1 <- table(simple_cluster1$diagnosis)
+simple_cluster.1 <- round(prop.table(cluster1)*100,2)
+# ·····················································
+simple_cluster2 <- sample_cluster_sinTFFniC %>% filter (jer_single == '2')
+cluster2 <- table(simple_cluster2$diagnosis)
+simple_cluster.2 <- round(prop.table(cluster2)*100,2)
+
+
+kable(cbind(rbind(cluster1,cluster2),rbind(simple_cluster.1,simple_cluster.2)))
+```
+
+----------------------------------------------------------------------------------------------------------------
+### *TSNE*
+```{r TSNE}
+tsne_data <- data
+tsne_data <- tsne_data%>% dplyr::select(c(1:7))
+tsne_data$diagnosis<-as.factor(tsne_data$diagnosis)
+Labels<-tsne_data$diagnosis
+
+colors = c('royalblue2','#ff7474ff')
+names(colors) = unique(tsne_data$diagnosis)
+```
+
+```{r tsne, results='hide'}
+## Ejecuto algoritmo (escondo resultado de iteraciones)
+set.seed(1409)
+tsne <- Rtsne(tsne_data[,-1], dims = 2, perplexity=12, verbose=TRUE, max_iter = 5000)
+set.seed(1409)
+tsne1 <- Rtsne(tsne_data[,-1], dims = 2, perplexity=5, verbose=TRUE, max_iter = 5000)
+set.seed(1409)
+tsne2 <- Rtsne(tsne_data[,-1], dims = 2, perplexity=50, verbose=TRUE, max_iter = 5000)
+```
+
+```{r tsneplot}
+tsne_df <- as.data.frame(tsne$Y)
+tsne_df <- cbind(tsne_df,as.data.frame(Labels))
+
+tsne_df1 <- as.data.frame(tsne1$Y)
+tsne_df1 <- cbind(tsne_df1,as.data.frame(Labels))
+
+tsne_df2 <- as.data.frame(tsne2$Y)
+tsne_df2 <- cbind(tsne_df2,as.data.frame(Labels))
+
+t1 <- ggplot(data=tsne_df1, aes(x=V1, y=V2))+geom_point(aes(color = Labels),alpha = 0.5)+
+        theme+labs(x='Dimensión 1', y=' Dimensión 2')+theme(legend.position = 'none')+
+        scale_color_manual(values=c('royalblue2','#ff7474ff'))+theme(plot.margin = unit(c(2.2,0.25,0.2,0.2), "cm"))
+
+t3 <- ggplot(data=tsne_df2, aes(x=V1, y=V2))+geom_point(aes(color = Labels),alpha = 0.5)+
+        theme+labs(x='Dimensión 1', y=NULL, color='Diagnóstico')+theme(legend.position = c(1.36,.5))+
+        scale_color_manual(values=c('royalblue2','#ff7474ff'))+theme(plot.margin = unit(c(2.2,0.25,0.2,0.2), "cm"))
+
+t2 <- ggplot(data=tsne_df, aes(x=V1, y=V2))+geom_point(aes(color = Labels),alpha = 0.5)+
+        theme+labs(x='Dimensión 1', y=NULL)+theme(legend.position = 'none')+
+        scale_color_manual(values=c('royalblue2','#ff7474ff'))+theme(plot.margin = unit(c(2.2,0.25,0.2,0.2), "cm")) #+
+         # geom_ellipse(aes(x0 = -22, y0 = -4, a = 19, b = 45, angle = 0.99),linetype=3, color='darkgray') +
+          #geom_ellipse(aes(x0 = 26, y0 = 12, a = 19, b = 42, angle = 0.75),linetype=3, color='darkgray') 
+
+plot_grid(t1, t2, t3, align = "h", ncol = 4, rel_widths = c(2.2,2,2,1))+
+    annotate("text", x=.46, y=.9, size=5, label='atop(bold("Análisis de TSNE"),"")', parse=TRUE)+
+        annotate("text", x=.18, y=.82, size=3.5, label='atop(italic("perplexity= 5"),"")', parse=TRUE)+
+        annotate("text", x=.46, y=.82, size=3.5, label='atop(italic("perplexity= 12"),"")', parse=TRUE)+
+        annotate("text", x=.735, y=.82, size=3.5, label='atop(italic("perplexity= 50"),"")', parse=TRUE)
+        
+```
+
+
+### *TSNE con datos escalados*
+```{r TSNE escalado}
+tsne_data2 <- datos_escalados
+tsne_data2 <- tsne_data2%>% dplyr::select(c(1:7))
+tsne_data2$diagnosis<-as.factor(tsne_data2$diagnosis)
+Labels<-tsne_data2$diagnosis
+
+colors = c('royalblue2','#ff7474ff')
+names(colors) = unique(tsne_data2$diagnosis)
+```
+
+```{r tsne escalado, results='hide'}
+## Ejecuto algoritmo (escondo resultado de iteraciones)
+set.seed(1409)
+tsne <- Rtsne(tsne_data2[,-1], dims = 2, perplexity=5, verbose=TRUE, max_iter = 5000)
+set.seed(1409)
+tsne1 <- Rtsne(tsne_data2[,-1], dims = 2, perplexity=10, verbose=TRUE, max_iter = 5000)
+set.seed(1409)
+tsne2 <- Rtsne(tsne_data2[,-1], dims = 2, perplexity=15, verbose=TRUE, max_iter = 5000)
+set.seed(1409)
+tsne3 <- Rtsne(tsne_data2[,-1], dims = 2, perplexity=20, verbose=TRUE, max_iter = 5000)
+set.seed(1409)
+tsne4 <- Rtsne(tsne_data2[,-1], dims = 2, perplexity=25, verbose=TRUE, max_iter = 5000)
+```
+
+```{r tsneplot escalado}
+tsne_df <- as.data.frame(tsne$Y)
+tsne_df <- cbind(tsne_df,as.data.frame(Labels))
+
+tsne_df1 <- as.data.frame(tsne1$Y)
+tsne_df1 <- cbind(tsne_df1,as.data.frame(Labels))
+
+tsne_df2 <- as.data.frame(tsne2$Y)
+tsne_df2 <- cbind(tsne_df2,as.data.frame(Labels))
+
+tsne_df3 <- as.data.frame(tsne3$Y)
+tsne_df3 <- cbind(tsne_df3,as.data.frame(Labels))
+
+tsne_df4 <- as.data.frame(tsne4$Y)
+tsne_df4 <- cbind(tsne_df4,as.data.frame(Labels))
+
+t1 <- ggplot(data=tsne_df1, aes(x=V1, y=V2))+geom_point(aes(color = Labels),alpha = 0.5)+
+        theme+labs(x='Dimensión 1', y=' Dimensión 2')+theme(legend.position = 'none')+
+        scale_color_manual(values=c('royalblue2','#ff7474ff'))+theme(plot.margin = unit(c(2.4,0.25,0.2,0.2), "cm"))
+
+t3 <- ggplot(data=tsne_df2, aes(x=V1, y=V2))+geom_point(aes(color = Labels),alpha = 0.5)+
+        theme+labs(x='Dimensión 1', y=NULL, color='Diagnóstico')+theme(legend.position = 'none')+
+        scale_color_manual(values=c('royalblue2','#ff7474ff'))+theme(plot.margin = unit(c(2.4,0.25,0.2,0.2), "cm"))
+
+t2 <- ggplot(data=tsne_df, aes(x=V1, y=V2))+geom_point(aes(color = Labels),alpha = 0.5)+
+        theme+labs(x='Dimensión 1', y=NULL)+theme(legend.position = 'none')+
+        scale_color_manual(values=c('royalblue2','#ff7474ff'))+theme(plot.margin = unit(c(2.4,0.25,0.2,0.2), "cm"))
+
+t4 <- ggplot(data=tsne_df3, aes(x=V1, y=V2))+geom_point(aes(color = Labels),alpha = 0.5)+
+        theme+labs(x='Dimensión 1', y=NULL)+theme(legend.position = 'none')+
+        scale_color_manual(values=c('royalblue2','#ff7474ff'))+theme(plot.margin = unit(c(2.4,0.25,0.2,0.2), "cm"))
+t5 <- ggplot(data=tsne_df4, aes(x=V1, y=V2))+geom_point(aes(color = Labels),alpha = 0.5)+
+        theme+labs(x='Dimensión 1', y=NULL)+theme(legend.position = c(1.5,0.5))+
+        scale_color_manual(values=c('royalblue2','#ff7474ff'))+theme(plot.margin = unit(c(2.4,0.25,0.2,0.2), "cm"))
+
+plot_grid(t1, t2, t3, t4, t5, align = "h", ncol = 6, rel_widths = c(1,1,1,1,1,0.6)) +
+    annotate("text", x=.46, y=.9, size=5, label='atop(bold("Análisis de TSNE"),"")', parse=TRUE)+
+        annotate("text", x=.46, y=.87, size=4, label='atop("datos estandarizados")', parse=TRUE)+
+        annotate("text", x=.11, y=.79, size=3.5, label='atop(italic("perplexity= 5"),"")', parse=TRUE)+
+        annotate("text", x=.285, y=.79, size=3.5, label='atop(italic("perplexity= 10"),"")', parse=TRUE)+
+        annotate("text", x=.46, y=.79, size=3.5, label='atop(italic("perplexity= 15"),"")', parse=TRUE)+
+        annotate("text", x=.64, y=.79, size=3.5, label='atop(italic("perplexity= 20"),"")', parse=TRUE)+
+        annotate("text", x=.82, y=.79, size=3.5, label='atop(italic("perplexity= 25"),"")', parse=TRUE)
+```
